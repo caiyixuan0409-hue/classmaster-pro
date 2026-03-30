@@ -44,10 +44,34 @@
             background-color: #faf9f9;
             color: #1a1c1c;
             -webkit-font-smoothing: antialiased;
+            /* Fix mobile scrolling lag */
+            overscroll-behavior-y: none;
+            touch-action: pan-y;
+            -webkit-overflow-scrolling: touch;
         }
         .bg-glass {
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
+        }
+        
+        /* Smooth scrolling for all containers */
+        .overflow-y-auto {
+            -webkit-overflow-scrolling: touch !important;
+            scroll-behavior: smooth;
+        }
+
+        #app-wrapper {
+            will-change: transform;
+            backface-visibility: hidden;
+        }
+        
+        .is-mobile-view #app-wrapper {
+            transition: none !important;
+        }
+
+        /* Prevent decorative elements from blocking touch */
+        .decorative-blob {
+            pointer-events: none;
         }
         .animate-float {
             animation: float 6s ease-in-out infinite;
@@ -80,7 +104,9 @@
         }
 
         .student-card {
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+            /* Hardware acceleration */
+            will-change: transform;
         }
         .student-card.absent {
             filter: grayscale(1) opacity(0.6);
@@ -159,17 +185,23 @@
                 transform: scale(0.9) !important;
                 padding: 1.5rem !important;
                 border-radius: 2rem !important;
-                max-height: 90vh !important;
+                max-height: 85vh !important;
                 overflow-y: auto !important;
+                -webkit-overflow-scrolling: touch !important;
+                /* Hardware acceleration for modal */
+                will-change: transform;
             }
             .backdrop-blur-sm {
                 backdrop-filter: none !important;
-                background-color: rgba(0, 0, 0, 0.8) !important;
+                background-color: rgba(0, 0, 0, 0.85) !important;
             }
             .picked-student-card {
                 padding: 0.75rem !important;
                 border-radius: 1.25rem !important;
                 gap: 0.5rem !important;
+                /* Reduce paint complexity */
+                box-shadow: none !important;
+                border: 1px solid rgba(0,0,0,0.05) !important;
             }
             .picked-student-card .text-3xl { font-size: 1.25rem !important; }
             .picked-student-card .w-10 { width: 2.25rem !important; height: 2.25rem !important; border-radius: 0.75rem !important; }
@@ -181,6 +213,13 @@
             #pick-results {
                 gap: 0.75rem !important;
                 padding: 0.5rem !important;
+                /* Ensure smooth scrolling in the results list */
+                -webkit-overflow-scrolling: touch !important;
+            }
+            
+            nav.backdrop-blur-md {
+                backdrop-filter: none !important;
+                background-color: rgba(255, 255, 255, 0.95) !important;
             }
         }
     </style>
@@ -189,8 +228,23 @@
     <div id="app-wrapper" class="min-h-screen flex flex-col transition-all duration-500 ease-in-out">
         <!-- Navigation -->
         <nav class="sticky top-0 z-50 w-full bg-white/70 backdrop-blur-md border-b border-black/5 px-6 py-4 flex flex-wrap justify-between items-center gap-4">
-            <div class="font-headline font-bold text-xl text-primary tracking-tight">
-                ClassMaster Pro
+            <div class="flex items-center gap-4">
+                <div class="font-headline font-bold text-lg sm:text-xl text-primary tracking-tight">
+                    ClassMaster Pro
+                </div>
+                
+                <!-- Workspace Switcher -->
+                <div class="flex items-center gap-2 bg-surface-container/50 p-1 rounded-2xl border border-black/5 shadow-sm">
+                    <div class="flex items-center gap-1 px-2 py-1">
+                        <i data-lucide="layers" class="w-3 h-3 text-primary/60"></i>
+                        <select id="workspace-select" onchange="switchWorkspace(this.value)" class="bg-transparent border-none text-[10px] font-bold focus:ring-0 cursor-pointer min-w-[60px] max-w-[80px] sm:max-w-[150px] truncate">
+                            <!-- Workspaces injected here -->
+                        </select>
+                    </div>
+                    <button onclick="manageWorkspaces()" class="p-1.5 hover:bg-primary/10 rounded-xl transition-colors" title="管理系统">
+                        <i data-lucide="settings-2" class="w-3.5 h-3.5 text-primary"></i>
+                    </button>
+                </div>
             </div>
             
             <div class="flex items-center gap-2 bg-surface-container/50 p-1 rounded-full border border-black/5 shadow-sm order-3 sm:order-none">
@@ -213,8 +267,8 @@
     <!-- Main Content -->
     <main id="main-content" class="flex-grow relative flex flex-col items-center justify-start px-6 py-12 overflow-x-hidden">
         <!-- Background Decorative Elements -->
-        <div class="absolute top-[-10%] right-[-5%] w-96 h-96 bg-primary/10 rounded-full blur-[100px] -z-10"></div>
-        <div class="absolute bottom-[-10%] left-[-5%] w-80 h-80 bg-secondary-container/20 rounded-full blur-[100px] -z-10"></div>
+        <div class="decorative-blob absolute top-[-10%] right-[-5%] w-96 h-96 bg-primary/10 rounded-full blur-[100px] -z-10"></div>
+        <div class="decorative-blob absolute bottom-[-10%] left-[-5%] w-80 h-80 bg-secondary-container/20 rounded-full blur-[100px] -z-10"></div>
 
         <!-- Landing View -->
         <div id="landing-view" class="max-w-4xl w-full text-center space-y-12 z-10 my-auto">
@@ -400,14 +454,30 @@
         // State Management
         let students = [];
         let history = [];
+        let workspaces = [{id: 'default', name: '默认系统'}];
+        let currentWorkspace = 'default';
 
         // Initialize Lucide Icons
         lucide.createIcons();
 
         // Load data from LocalStorage
         function init() {
-            const savedData = localStorage.getItem('classmaster_students_v2');
-            const savedHistory = localStorage.getItem('classmaster_history_v2');
+            // Load Workspaces
+            const savedWorkspaces = localStorage.getItem('classmaster_workspaces_v3');
+            if (savedWorkspaces) {
+                try {
+                    workspaces = JSON.parse(savedWorkspaces);
+                } catch (e) { console.error("Failed to parse workspaces", e); }
+            }
+            
+            currentWorkspace = localStorage.getItem('classmaster_current_workspace_v3') || 'default';
+            if (!workspaces.find(w => w.id === currentWorkspace)) {
+                currentWorkspace = workspaces[0].id;
+            }
+
+            const savedData = localStorage.getItem(`classmaster_students_${currentWorkspace}_v3`);
+            const savedHistory = localStorage.getItem(`classmaster_history_${currentWorkspace}_v3`);
+            const lastResetDate = localStorage.getItem(`classmaster_last_reset_${currentWorkspace}_v3`);
             const savedViewMode = localStorage.getItem('classmaster_view_mode') || 'auto';
             
             setViewMode(savedViewMode);
@@ -415,18 +485,29 @@
             if (savedData) {
                 try {
                     students = JSON.parse(savedData);
-                } catch (e) {
-                    console.error("Failed to parse saved data", e);
-                }
+                } catch (e) { console.error("Failed to parse saved data", e); }
             }
             
             if (savedHistory) {
                 try {
                     history = JSON.parse(savedHistory);
-                } catch (e) {
-                    console.error("Failed to parse history", e);
-                }
+                } catch (e) { console.error("Failed to parse history", e); }
             }
+
+            // Daily Reset Logic
+            const today = new Date().toLocaleDateString();
+            if (lastResetDate !== today && students.length > 0) {
+                // Reset scores for the new day
+                students.forEach(s => {
+                    s.score = 0;
+                    s.isPresent = true;
+                });
+                localStorage.setItem(`classmaster_last_reset_${currentWorkspace}_v3`, today);
+                addHistoryEntry('系统', 'system', `新的一天：分数已重置`, undefined);
+                saveAndRender();
+            }
+
+            updateWorkspaceUI();
 
             if (students.length > 0) {
                 renderDashboard();
@@ -434,6 +515,121 @@
                 showLanding();
             }
         }
+
+        function updateWorkspaceUI() {
+            const select = document.getElementById('workspace-select');
+            select.innerHTML = workspaces.map(w => `
+                <option value="${w.id}" ${w.id === currentWorkspace ? 'selected' : ''}>${w.name}</option>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        function switchWorkspace(id) {
+            currentWorkspace = id;
+            localStorage.setItem('classmaster_current_workspace_v3', id);
+            init();
+        }
+
+        function manageWorkspaces() {
+            const modal = document.createElement('div');
+            modal.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6";
+            modal.innerHTML = `
+                <div class="bg-white rounded-[2.5rem] p-8 max-w-md w-full space-y-6 shadow-2xl transform scale-90 animate-in fade-in zoom-in duration-300">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-xl font-headline font-bold text-primary">管理系统</h3>
+                        <button onclick="this.parentElement.parentElement.parentElement.remove()" class="p-2 hover:bg-black/5 rounded-full">
+                            <i data-lucide="x" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        <div class="flex gap-2">
+                            <input id="new-ws-name" type="text" placeholder="新系统名称 (如: 二班)" class="flex-grow px-4 py-2 bg-surface-container rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-sm">
+                            <button onclick="addNewWorkspace()" class="bg-primary text-white px-4 py-2 rounded-xl text-sm font-bold active:scale-95 transition-all">添加</button>
+                        </div>
+                        
+                        <div class="max-h-60 overflow-y-auto space-y-2 custom-scrollbar pr-2">
+                            ${workspaces.map(w => `
+                                <div class="flex items-center justify-between p-3 bg-surface-container/50 rounded-xl border border-black/5">
+                                    <div class="flex flex-col">
+                                        <span class="text-sm font-semibold text-on-surface">${w.name}</span>
+                                        <span class="text-[10px] text-on-surface-variant/40 font-mono">${w.id}</span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <button onclick="renameWorkspace('${w.id}')" class="p-1.5 text-primary/60 hover:bg-primary/5 rounded-lg transition-colors">
+                                            <i data-lucide="edit-3" class="w-4 h-4"></i>
+                                        </button>
+                                        ${w.id !== 'default' ? `
+                                            <button onclick="deleteWorkspace('${w.id}')" class="p-1.5 text-red-400 hover:bg-red-50 rounded-lg transition-colors">
+                                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            lucide.createIcons();
+        }
+
+        window.renameWorkspace = function(id) {
+            const ws = workspaces.find(w => w.id === id);
+            if (!ws) return;
+            const newName = prompt('请输入新名称:', ws.name);
+            if (newName && newName.trim()) {
+                ws.name = newName.trim();
+                localStorage.setItem('classmaster_workspaces_v3', JSON.stringify(workspaces));
+                const modal = document.querySelector('.fixed');
+                if (modal) modal.remove();
+                manageWorkspaces();
+                updateWorkspaceUI();
+            }
+        };
+
+        window.addNewWorkspace = function() {
+            const input = document.getElementById('new-ws-name');
+            const name = input.value.trim();
+            if (!name) return;
+            
+            const id = 'ws_' + Date.now();
+            workspaces.push({id, name});
+            localStorage.setItem('classmaster_workspaces_v3', JSON.stringify(workspaces));
+            input.value = '';
+            
+            // Refresh modal
+            const modal = input.closest('.fixed');
+            modal.remove();
+            manageWorkspaces();
+            
+            // Switch to new workspace
+            switchWorkspace(id);
+        };
+
+        window.deleteWorkspace = function(id) {
+            if (id === 'default') return;
+            if (!confirm('确定要删除这个系统吗？该系统的所有学生数据和历史记录都将丢失。')) return;
+            
+            workspaces = workspaces.filter(w => w.id !== id);
+            localStorage.setItem('classmaster_workspaces_v3', JSON.stringify(workspaces));
+            
+            // Clean up storage
+            localStorage.removeItem(`classmaster_students_${id}_v3`);
+            localStorage.removeItem(`classmaster_history_${id}_v3`);
+            localStorage.removeItem(`classmaster_last_reset_${id}_v3`);
+            
+            if (currentWorkspace === id) {
+                currentWorkspace = 'default';
+                localStorage.setItem('classmaster_current_workspace_v3', 'default');
+            }
+            
+            const modal = document.querySelector('.fixed');
+            if (modal) modal.remove();
+            manageWorkspaces();
+            init();
+        };
 
         function showLanding() {
             document.getElementById('landing-view').classList.remove('hidden');
@@ -583,13 +779,13 @@
                 action,
                 value,
                 timestamp: new Date().toLocaleString('zh-CN', { 
-                    month: '2-digit', day: '2-digit', 
+                    year: 'numeric', month: '2-digit', day: '2-digit', 
                     hour: '2-digit', minute: '2-digit', second: '2-digit' 
                 })
             };
             history.unshift(entry);
-            // Keep only last 100 entries to prevent localStorage bloat
-            if (history.length > 100) history = history.slice(0, 100);
+            // Keep only last 500 entries to prevent localStorage bloat
+            if (history.length > 500) history = history.slice(0, 500);
             saveAndRender();
         }
 
@@ -646,8 +842,8 @@
         }
 
         function saveAndRender() {
-            localStorage.setItem('classmaster_students_v2', JSON.stringify(students));
-            localStorage.setItem('classmaster_history_v2', JSON.stringify(history));
+            localStorage.setItem(`classmaster_students_${currentWorkspace}_v3`, JSON.stringify(students));
+            localStorage.setItem(`classmaster_history_${currentWorkspace}_v3`, JSON.stringify(history));
             renderDashboard();
         }
 
@@ -732,8 +928,9 @@
             document.getElementById('confirm-reset').onclick = () => {
                 students = [];
                 history = [];
-                localStorage.removeItem('classmaster_students_v2');
-                localStorage.removeItem('classmaster_history_v2');
+                localStorage.removeItem(`classmaster_students_${currentWorkspace}_v3`);
+                localStorage.removeItem(`classmaster_history_${currentWorkspace}_v3`);
+                localStorage.removeItem(`classmaster_last_reset_${currentWorkspace}_v3`);
                 modal.remove();
                 showLanding();
             };
