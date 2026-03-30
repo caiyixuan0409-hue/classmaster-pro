@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ClassMaster Pro | 班级管理系统</title>
+    <title>ClassMaster Pro | 智能课堂管理</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -78,34 +78,48 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #ccc3d5;
         }
+
+        .student-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .student-card.absent {
+            filter: grayscale(1) opacity(0.6);
+        }
     </style>
 </head>
-<body class="min-h-screen flex flex-col selection:bg-primary/20">
+<body class="min-h-screen selection:bg-primary/20">
+    <div id="app-wrapper" class="min-h-screen flex flex-col transition-all duration-500 ease-in-out">
+        <!-- Navigation -->
+        <nav class="sticky top-0 z-50 w-full bg-white/70 backdrop-blur-md border-b border-black/5 px-6 py-4 flex flex-wrap justify-between items-center gap-4">
+            <div class="font-headline font-bold text-xl text-primary tracking-tight">
+                ClassMaster Pro
+            </div>
+            
+            <div class="flex items-center gap-2 bg-surface-container/50 p-1 rounded-full border border-black/5 shadow-sm order-3 sm:order-none">
+                <button onclick="setViewMode('auto')" id="btn-view-auto" class="px-3 py-1.5 rounded-full text-[10px] font-bold transition-all">自动</button>
+                <button onclick="setViewMode('mobile')" id="btn-view-mobile" class="px-3 py-1.5 rounded-full text-[10px] font-bold transition-all">手机</button>
+                <button onclick="setViewMode('desktop')" id="btn-view-desktop" class="px-3 py-1.5 rounded-full text-[10px] font-bold transition-all">电脑</button>
+            </div>
 
-    <!-- Navigation -->
-    <nav class="sticky top-0 z-50 w-full bg-white/70 backdrop-blur-md border-b border-black/5 px-6 py-4 flex justify-between items-center">
-        <div class="font-headline font-bold text-xl text-primary tracking-tight">
-            ClassMaster Pro
-        </div>
-        
-        <div id="nav-actions" class="flex items-center gap-3">
-            <button onclick="resetSystem()" class="text-on-surface-variant hover:bg-primary/5 transition-colors px-4 py-2 rounded-xl text-sm font-semibold active:scale-95 duration-200">
-                重置系统
-            </button>
-            <button id="export-btn" onclick="exportReport()" class="hidden bg-primary text-white px-5 py-2 rounded-xl text-sm font-semibold active:scale-95 duration-200 shadow-sm hover:shadow-md transition-all">
-                导出报表
-            </button>
-        </div>
-    </nav>
+            <div id="nav-actions" class="flex items-center gap-3">
+                <button onclick="resetSystem()" class="text-on-surface-variant hover:bg-primary/5 transition-colors px-4 py-2 rounded-xl text-sm font-semibold active:scale-95 duration-200">
+                    重置系统
+                </button>
+                <button id="export-btn" onclick="exportReport()" class="hidden bg-primary text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-primary/20 hover:shadow-primary/40 active:scale-95 transition-all duration-200 flex items-center gap-2">
+                    <i data-lucide="download" class="w-4 h-4"></i>
+                    导出报表
+                </button>
+            </div>
+        </nav>
 
     <!-- Main Content -->
-    <main id="main-content" class="flex-grow relative flex flex-col items-center justify-center px-6 py-12 overflow-hidden">
+    <main id="main-content" class="flex-grow relative flex flex-col items-center justify-start px-6 py-12 overflow-x-hidden">
         <!-- Background Decorative Elements -->
         <div class="absolute top-[-10%] right-[-5%] w-96 h-96 bg-primary/10 rounded-full blur-[100px] -z-10"></div>
         <div class="absolute bottom-[-10%] left-[-5%] w-80 h-80 bg-secondary-container/20 rounded-full blur-[100px] -z-10"></div>
 
         <!-- Landing View -->
-        <div id="landing-view" class="max-w-4xl w-full text-center space-y-12 z-10">
+        <div id="landing-view" class="max-w-4xl w-full text-center space-y-12 z-10 my-auto">
             <div class="space-y-6">
                 <div class="inline-flex items-center justify-center w-24 h-24 rounded-[2rem] bg-white shadow-xl mb-4 transform -rotate-6">
                     <i data-lucide="graduation-cap" class="text-primary w-12 h-12"></i>
@@ -135,6 +149,7 @@
                             <p class="text-on-surface-variant text-sm mt-2 font-semibold tracking-wide uppercase opacity-70">
                                 支持格式：.xlsx, .csv
                             </p>
+                            <p class="text-on-surface-variant/60 text-xs mt-1">列顺序：学号、姓名、班级</p>
                         </div>
 
                         <label class="w-full md:w-auto px-12 py-5 bg-gradient-to-r from-primary to-primary-container text-white rounded-xl font-headline text-lg font-bold shadow-lg shadow-primary/20 hover:shadow-primary/40 hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 flex items-center justify-center gap-3 mx-auto cursor-pointer">
@@ -159,30 +174,99 @@
                         </div>
                     </div>
                 </div>
-
-                <div class="max-w-md bg-white/50 backdrop-blur-sm p-6 rounded-2xl border border-black/5">
-                    <p class="text-sm italic text-on-surface-variant leading-relaxed font-medium">
-                        "ClassMaster Pro 的目标是减轻认知负担。通过导入您的名册，系统会自动配置座位表、出勤日志和性能指标，并根据您的具体小组规模进行量身定制。"
-                    </p>
-                </div>
             </div>
         </div>
 
         <!-- Dashboard View -->
         <div id="dashboard-view" class="hidden w-full max-w-6xl z-10 space-y-8">
-            <div class="flex flex-col md:flex-row justify-between items-end gap-4">
-                <div class="space-y-2">
-                    <h2 class="text-3xl font-headline font-extrabold text-on-surface">班级名册</h2>
-                    <p class="text-on-surface-variant font-medium">点击学生卡片进行加分</p>
+            <!-- Top Controls -->
+            <div class="flex flex-col md:flex-row justify-between items-center gap-6 bg-white/40 backdrop-blur-xl p-8 rounded-[2.5rem] border border-white/20 shadow-xl">
+                <div class="space-y-2 text-center md:text-left">
+                    <h2 class="text-4xl font-headline font-extrabold text-on-surface tracking-tight">班级名册</h2>
+                    <p class="text-on-surface-variant font-medium">点击卡片加分，使用右上角切换出勤状态</p>
                 </div>
-                <div class="bg-white/50 backdrop-blur-md px-6 py-3 rounded-2xl border border-black/5 shadow-sm">
-                    <span class="text-xs font-bold uppercase tracking-widest text-on-surface-variant/60">总人数</span>
-                    <div id="student-count" class="text-2xl font-headline font-bold text-primary">0</div>
+                
+                <div class="flex flex-wrap items-center justify-center gap-4">
+                    <!-- Class Filter -->
+                    <div class="flex items-center gap-2 bg-white/80 p-2 rounded-2xl border border-black/5 shadow-sm">
+                        <span class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60 ml-2">班级</span>
+                        <select id="class-filter" onchange="renderDashboard()" class="bg-transparent border-none focus:ring-0 font-headline font-bold text-primary text-sm cursor-pointer">
+                            <option value="all">全部班级</option>
+                            <option value="401">一班 (401)</option>
+                            <option value="402">二班 (402)</option>
+                        </select>
+                    </div>
+
+                    <!-- Score Filter -->
+                    <div class="flex items-center gap-2 bg-white/80 p-2 rounded-2xl border border-black/5 shadow-sm">
+                        <label class="flex items-center gap-2 cursor-pointer px-2">
+                            <input type="checkbox" id="no-score-filter" class="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary">
+                            <span class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">仅抽零分</span>
+                        </label>
+                    </div>
+
+                    <div class="flex items-center gap-2 bg-white/80 p-2 rounded-2xl border border-black/5 shadow-sm">
+                        <span class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60 ml-2">抽取人数</span>
+                        <input type="number" id="pick-count" value="1" min="1" class="w-16 bg-transparent border-none focus:ring-0 text-center font-headline font-bold text-primary text-lg">
+                    </div>
+
+                    <button onclick="randomPick()" class="group px-8 py-4 bg-gradient-to-r from-primary to-primary-container text-white rounded-2xl font-headline font-bold shadow-lg shadow-primary/20 hover:shadow-primary/40 hover:scale-[1.05] active:scale-[0.95] transition-all duration-300 flex items-center gap-3">
+                        <i data-lucide="dices" class="w-6 h-6 group-hover:rotate-180 transition-transform duration-500"></i>
+                        随机抽人
+                    </button>
+                    
+                    <div class="bg-white/80 px-6 py-4 rounded-2xl border border-black/5 shadow-sm flex flex-col items-center">
+                        <span class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">当前出勤</span>
+                        <div id="student-count" class="text-2xl font-headline font-bold text-primary">0 / 0</div>
+                    </div>
                 </div>
             </div>
 
-            <div id="student-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                <!-- Students will be rendered here -->
+            <!-- Student Grids by Class -->
+            <div id="class-sections" class="space-y-12">
+                <!-- Class 401 Section -->
+                <div id="section-401" class="space-y-6">
+                    <div class="flex items-center gap-4">
+                        <div class="h-px flex-grow bg-black/5"></div>
+                        <h3 class="font-headline font-extrabold text-2xl text-primary/40 uppercase tracking-widest">一班 (401)</h3>
+                        <div class="h-px flex-grow bg-black/5"></div>
+                    </div>
+                    <div id="student-grid-401" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6"></div>
+                </div>
+
+                <!-- Class 402 Section -->
+                <div id="section-402" class="space-y-6">
+                    <div class="flex items-center gap-4">
+                        <div class="h-px flex-grow bg-black/5"></div>
+                        <h3 class="font-headline font-extrabold text-2xl text-primary/40 uppercase tracking-widest">二班 (402)</h3>
+                        <div class="h-px flex-grow bg-black/5"></div>
+                    </div>
+                    <div id="student-grid-402" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6"></div>
+                </div>
+
+                <!-- Other Students Section -->
+                <div id="section-other" class="hidden space-y-6">
+                    <div class="flex items-center gap-4">
+                        <div class="h-px flex-grow bg-black/5"></div>
+                        <h3 class="font-headline font-extrabold text-2xl text-primary/40 uppercase tracking-widest">其他</h3>
+                        <div class="h-px flex-grow bg-black/5"></div>
+                    </div>
+                    <div id="student-grid-other" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6"></div>
+                </div>
+            </div>
+
+            <!-- History Section -->
+            <div id="history-section" class="space-y-6 pt-12">
+                <div class="flex items-center gap-4">
+                    <div class="h-px flex-grow bg-black/5"></div>
+                    <h3 class="font-headline font-extrabold text-2xl text-primary/40 uppercase tracking-widest">操作历史</h3>
+                    <div class="h-px flex-grow bg-black/5"></div>
+                </div>
+                <div class="bg-white/40 backdrop-blur-xl rounded-[2.5rem] border border-white/20 shadow-xl overflow-hidden">
+                    <div id="history-list" class="max-h-96 overflow-y-auto p-6 space-y-3 custom-scrollbar">
+                        <div class="text-center text-on-surface-variant/40 py-8 font-medium">暂无操作记录</div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -214,36 +298,40 @@
         </div>
     </main>
 
-    <!-- Mobile Bottom Bar -->
-    <div id="mobile-bar" class="md:hidden fixed bottom-0 left-0 w-full p-6 bg-white/80 backdrop-blur-md border-t border-black/5 z-50">
-        <button onclick="randomPick()" class="w-full flex items-center justify-center bg-primary text-white rounded-xl px-8 py-4 shadow-lg shadow-primary/20 active:scale-95 transition-all font-headline font-bold uppercase tracking-widest text-sm">
-            <i data-lucide="dices" class="w-5 h-5 mr-3"></i>
-            随机抽取
-        </button>
-    </div>
-
     <script>
         // State Management
         let students = [];
+        let history = [];
 
         // Initialize Lucide Icons
         lucide.createIcons();
 
         // Load data from LocalStorage
         function init() {
-            const savedData = localStorage.getItem('classmaster_students');
+            const savedData = localStorage.getItem('classmaster_students_v2');
+            const savedHistory = localStorage.getItem('classmaster_history_v2');
+            const savedViewMode = localStorage.getItem('classmaster_view_mode') || 'auto';
+            
+            setViewMode(savedViewMode);
+
             if (savedData) {
                 try {
                     students = JSON.parse(savedData);
-                    if (students.length > 0) {
-                        renderDashboard();
-                    } else {
-                        showLanding();
-                    }
                 } catch (e) {
                     console.error("Failed to parse saved data", e);
-                    showLanding();
                 }
+            }
+            
+            if (savedHistory) {
+                try {
+                    history = JSON.parse(savedHistory);
+                } catch (e) {
+                    console.error("Failed to parse history", e);
+                }
+            }
+
+            if (students.length > 0) {
+                renderDashboard();
             } else {
                 showLanding();
             }
@@ -255,7 +343,6 @@
             document.getElementById('export-btn').classList.add('hidden');
             document.getElementById('deco-left').classList.remove('hidden');
             document.getElementById('deco-right').classList.remove('hidden');
-            document.getElementById('mobile-bar').classList.add('hidden');
         }
 
         function renderDashboard() {
@@ -264,37 +351,148 @@
             document.getElementById('export-btn').classList.remove('hidden');
             document.getElementById('deco-left').classList.add('hidden');
             document.getElementById('deco-right').classList.add('hidden');
-            document.getElementById('mobile-bar').classList.remove('hidden');
             
-            const grid = document.getElementById('student-grid');
+            const grid401 = document.getElementById('student-grid-401');
+            const grid402 = document.getElementById('student-grid-402');
+            const gridOther = document.getElementById('student-grid-other');
+            const section401 = document.getElementById('section-401');
+            const section402 = document.getElementById('section-402');
+            const sectionOther = document.getElementById('section-other');
             const countEl = document.getElementById('student-count');
             
-            countEl.innerText = students.length;
-            grid.innerHTML = '';
+            const presentCount = students.filter(s => s.isPresent).length;
+            countEl.innerText = `${presentCount} / ${students.length}`;
+            
+            grid401.innerHTML = '';
+            grid402.innerHTML = '';
+            gridOther.innerHTML = '';
+            
+            section401.classList.remove('hidden');
+            section402.classList.remove('hidden');
+            sectionOther.classList.add('hidden');
+
+            let has401 = false;
+            let has402 = false;
+            let hasOther = false;
 
             students.forEach((student, index) => {
                 const card = document.createElement('div');
-                card.className = "bg-white p-5 rounded-2xl shadow-sm border border-black/5 hover:shadow-md hover:border-primary/20 transition-all cursor-pointer group relative overflow-hidden active:scale-95";
-                card.onclick = () => addPoint(index);
+                card.className = `student-card group bg-white p-6 rounded-[2rem] shadow-sm border border-black/5 relative overflow-hidden flex flex-col items-center gap-4 ${student.isPresent ? '' : 'absent'}`;
+                
+                const classCode = student.id.length >= 6 ? student.id.slice(-6, -3) : '';
+                const studentNum = student.id.length >= 3 ? student.id.slice(-3) : '';
+                const classNameDisplay = classCode === '401' ? '一班' : (classCode === '402' ? '二班' : (student.className || ''));
                 
                 card.innerHTML = `
-                    <div class="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                    <div class="relative z-10 flex flex-col items-center gap-3">
-                        <div class="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center font-headline font-bold text-primary">
+                    <!-- Delete Button (Visible on Hover) -->
+                    <button onclick="deleteStudent(${index}, event)" class="absolute top-4 left-4 z-20 w-10 h-10 rounded-full flex items-center justify-center bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-600 transition-all opacity-0 group-hover:opacity-100 active:scale-90">
+                        <i data-lucide="trash-2" class="w-5 h-5"></i>
+                    </button>
+
+                    <!-- Attendance Toggle -->
+                    <button onclick="toggleAttendance(${index}, event)" class="absolute top-4 right-4 z-20 w-10 h-10 rounded-full flex items-center justify-center transition-all ${student.isPresent ? 'bg-secondary-container text-on-secondary-container hover:scale-110' : 'bg-surface-container text-on-surface-variant hover:scale-110'}">
+                        <i data-lucide="${student.isPresent ? 'user-check' : 'user-x'}" class="w-5 h-5"></i>
+                    </button>
+
+                    <!-- Student Info -->
+                    <div class="flex flex-col items-center text-center mt-4">
+                        <div class="w-16 h-16 rounded-2xl bg-surface-container flex items-center justify-center font-headline font-bold text-primary text-2xl mb-4 shadow-inner">
                             ${student.name.charAt(0)}
                         </div>
-                        <div class="text-center">
-                            <div class="font-bold text-on-surface truncate w-full max-w-[100px]">${student.name}</div>
-                            <div class="text-xs font-bold text-primary mt-1">${student.score} 分</div>
+                        <div class="font-headline font-extrabold text-2xl text-on-surface leading-tight mb-1">${student.name}</div>
+                        <div class="flex items-center gap-2">
+                            <div class="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-widest">${student.id}</div>
+                            <div class="px-1.5 py-0.5 bg-primary/10 rounded text-[9px] font-bold text-primary">#${studentNum}</div>
                         </div>
-                        <div class="mt-2 w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all transform translate-y-2 group-hover:translate-y-0">
+                        <div class="text-[10px] font-medium text-primary/60 mt-1">${classNameDisplay}</div>
+                    </div>
+
+                    <!-- Score Controls -->
+                    <div class="flex items-center gap-4 mt-2 bg-surface-container/50 px-4 py-2 rounded-2xl">
+                        <button onclick="updateScore(${index}, -1, event)" class="w-8 h-8 rounded-full bg-white shadow-sm flex items-center justify-center hover:bg-error-container hover:text-error transition-colors active:scale-90">
+                            <i data-lucide="minus" class="w-4 h-4"></i>
+                        </button>
+                        <div class="font-headline font-bold text-xl text-primary min-w-[2rem] text-center">${student.score}</div>
+                        <button onclick="updateScore(${index}, 1, event)" class="w-8 h-8 rounded-full bg-white shadow-sm flex items-center justify-center hover:bg-secondary-container hover:text-on-secondary-container transition-colors active:scale-90">
                             <i data-lucide="plus" class="w-4 h-4"></i>
-                        </div>
+                        </button>
                     </div>
                 `;
-                grid.appendChild(card);
+                
+                if (classCode === '401') {
+                    grid401.appendChild(card);
+                    has401 = true;
+                } else if (classCode === '402') {
+                    grid402.appendChild(card);
+                    has402 = true;
+                } else {
+                    gridOther.appendChild(card);
+                    hasOther = true;
+                }
             });
+
+            section401.classList.toggle('hidden', !has401);
+            section402.classList.toggle('hidden', !has402);
+            sectionOther.classList.toggle('hidden', !hasOther);
+            
+            // Apply dashboard filtering if needed
+            const classFilter = document.getElementById('class-filter').value;
+            if (classFilter === '401') {
+                section402.classList.add('hidden');
+                sectionOther.classList.add('hidden');
+            } else if (classFilter === '402') {
+                section401.classList.add('hidden');
+                sectionOther.classList.add('hidden');
+            }
+
             lucide.createIcons();
+            renderHistory();
+        }
+
+        function renderHistory() {
+            const historyList = document.getElementById('history-list');
+            if (history.length === 0) {
+                historyList.innerHTML = '<div class="text-center text-on-surface-variant/40 py-8 font-medium">暂无操作记录</div>';
+                return;
+            }
+
+            historyList.innerHTML = history.map(item => `
+                <div class="flex items-center justify-between p-4 bg-white/60 rounded-2xl border border-black/5 shadow-sm hover:shadow-md transition-all">
+                    <div class="flex items-center gap-4">
+                        <div class="w-10 h-10 rounded-xl ${item.type === 'score' ? 'bg-primary/10 text-primary' : 'bg-secondary-container/20 text-on-secondary-container'} flex items-center justify-center">
+                            <i data-lucide="${item.type === 'score' ? 'trending-up' : 'user-check'}" class="w-5 h-5"></i>
+                        </div>
+                        <div>
+                            <div class="font-headline font-bold text-on-surface">${item.studentName}</div>
+                            <div class="text-[10px] font-bold text-on-surface-variant/40 uppercase tracking-widest">${item.action}</div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-[10px] font-bold text-on-surface-variant/60">${item.timestamp}</div>
+                        <div class="text-xs font-bold ${item.value > 0 ? 'text-green-600' : (item.value < 0 ? 'text-red-500' : 'text-primary')}">
+                            ${item.value !== undefined ? (item.value > 0 ? '+' + item.value : item.value) : ''}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        function addHistoryEntry(studentName, type, action, value) {
+            const entry = {
+                studentName,
+                type,
+                action,
+                value,
+                timestamp: new Date().toLocaleString('zh-CN', { 
+                    month: '2-digit', day: '2-digit', 
+                    hour: '2-digit', minute: '2-digit', second: '2-digit' 
+                })
+            };
+            history.unshift(entry);
+            // Keep only last 100 entries to prevent localStorage bloat
+            if (history.length > 100) history = history.slice(0, 100);
+            saveAndRender();
         }
 
         // Excel Import Logic
@@ -308,82 +506,300 @@
                 const workbook = XLSX.read(data, {type: 'array'});
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
-                const json = XLSX.utils.sheet_to_json(worksheet);
+                
+                // Use raw arrays to ensure column order
+                const rawData = XLSX.utils.sheet_to_json(worksheet, {header: 1});
+                
+                // Skip header if it looks like one (non-numeric first column or specific keywords)
+                const startIdx = (isNaN(rawData[0][0]) || rawData[0][0] === '学号') ? 1 : 0;
 
-                // Expecting a column named "姓名" or "Name"
-                students = json.map(row => ({
-                    name: row['姓名'] || row['Name'] || row['name'] || Object.values(row)[0] || '未知学生',
-                    score: parseInt(row['分数'] || row['Score'] || row['score'] || 0)
-                })).filter(s => s.name);
+                students = rawData.slice(startIdx).map(row => {
+                    if (!row[1]) return null; // Skip empty rows
+                    return {
+                        id: row[0] || 'N/A',
+                        name: row[1],
+                        className: row[2] || '',
+                        score: 0,
+                        isPresent: true
+                    };
+                }).filter(s => s !== null);
 
                 if (students.length > 0) {
                     saveAndRender();
                 } else {
-                    alert('未能识别到学生名单，请确保表格中有“姓名”列。');
+                    alert('未能识别到学生名单，请确保表格格式正确：第一列学号，第二列姓名，第三列班级。');
                 }
             };
             reader.readAsArrayBuffer(file);
         });
 
-        function addPoint(index) {
-            students[index].score = (students[index].score || 0) + 1;
-            saveAndRender();
-            
-            // Simple feedback animation
-            const cards = document.querySelectorAll('#student-grid > div');
-            const card = cards[index];
-            card.classList.add('ring-2', 'ring-primary/50');
-            setTimeout(() => card.classList.remove('ring-2', 'ring-primary/50'), 300);
+        function updateScore(index, delta, event) {
+            event.stopPropagation();
+            const student = students[index];
+            student.score = (student.score || 0) + delta;
+            addHistoryEntry(student.name, 'score', delta > 0 ? '加分' : '减分', delta);
+        }
+
+        function toggleAttendance(index, event) {
+            event.stopPropagation();
+            const student = students[index];
+            student.isPresent = !student.isPresent;
+            addHistoryEntry(student.name, 'attendance', student.isPresent ? '签到' : '缺勤', undefined);
         }
 
         function saveAndRender() {
-            localStorage.setItem('classmaster_students', JSON.stringify(students));
+            localStorage.setItem('classmaster_students_v2', JSON.stringify(students));
+            localStorage.setItem('classmaster_history_v2', JSON.stringify(history));
             renderDashboard();
         }
 
+        window.updatePickedScore = function(index, direction, btn) {
+            const input = btn.parentElement.querySelector('input');
+            const amount = parseInt(input.value) || 0;
+            const delta = amount * direction;
+            const student = students[index];
+            student.score = (student.score || 0) + delta;
+            addHistoryEntry(student.name, 'score', delta > 0 ? '随机加分' : '随机减分', delta);
+            
+            // Visual feedback
+            const container = btn.closest('.picked-student-card');
+            const originalBg = container.style.backgroundColor;
+            container.style.backgroundColor = direction > 0 ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+            setTimeout(() => {
+                container.style.backgroundColor = '';
+            }, 500);
+        };
+
+        function deleteStudent(index, event) {
+            event.stopPropagation();
+            const student = students[index];
+            
+            const modal = document.createElement('div');
+            modal.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6";
+            modal.innerHTML = `
+                <div class="bg-white rounded-[2.5rem] p-10 max-w-sm w-full text-center space-y-6 shadow-2xl transform animate-in fade-in zoom-in duration-300">
+                    <div class="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto">
+                        <i data-lucide="user-minus" class="text-red-500 w-8 h-8"></i>
+                    </div>
+                    <div class="space-y-2">
+                        <h3 class="text-xl font-headline font-bold text-on-surface">删除学生？</h3>
+                        <p class="text-on-surface-variant text-sm">确定要从名单中删除 <b>${student.name}</b> 吗？</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <button onclick="this.closest('.fixed').remove()" class="flex-1 py-3 bg-surface-container text-on-surface-variant rounded-xl font-bold active:scale-95 transition-all">
+                            取消
+                        </button>
+                        <button id="confirm-delete" class="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold shadow-lg shadow-red-200 active:scale-95 transition-all">
+                            确定删除
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            lucide.createIcons();
+
+            document.getElementById('confirm-delete').onclick = () => {
+                addHistoryEntry(student.name, 'system', '删除学生', undefined);
+                students.splice(index, 1);
+                saveAndRender();
+                modal.remove();
+            };
+        }
+
         function resetSystem() {
-            if (confirm('确定要重置系统吗？所有学生数据将被清除。')) {
+            const modal = document.createElement('div');
+            modal.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6";
+            modal.innerHTML = `
+                <div class="bg-white rounded-[2.5rem] p-10 max-w-sm w-full text-center space-y-6 shadow-2xl transform animate-in fade-in zoom-in duration-300">
+                    <div class="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto">
+                        <i data-lucide="alert-triangle" class="text-red-500 w-8 h-8"></i>
+                    </div>
+                    <div class="space-y-2">
+                        <h3 class="text-xl font-headline font-bold text-on-surface">重置系统？</h3>
+                        <p class="text-on-surface-variant text-sm">确定要清除所有学生数据吗？此操作无法撤销。</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <button onclick="this.closest('.fixed').remove()" class="flex-1 py-3 bg-surface-container text-on-surface-variant rounded-xl font-bold active:scale-95 transition-all">
+                            取消
+                        </button>
+                        <button id="confirm-reset" class="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold shadow-lg shadow-red-200 active:scale-95 transition-all">
+                            确定重置
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            lucide.createIcons();
+
+            document.getElementById('confirm-reset').onclick = () => {
                 students = [];
-                localStorage.removeItem('classmaster_students');
+                history = [];
+                localStorage.removeItem('classmaster_students_v2');
+                localStorage.removeItem('classmaster_history_v2');
+                modal.remove();
                 showLanding();
+            };
+        }
+
+        function setViewMode(mode) {
+            const wrapper = document.getElementById('app-wrapper');
+            const body = document.body;
+            
+            // Reset classes
+            wrapper.classList.remove('max-w-[430px]', 'mx-auto', 'shadow-[0_0_100px_rgba(0,0,0,0.1)]', 'border-x', 'border-black/5');
+            wrapper.style.width = '';
+            body.style.overflowX = '';
+            
+            if (mode === 'mobile') {
+                wrapper.classList.add('max-w-[430px]', 'mx-auto', 'shadow-[0_0_100px_rgba(0,0,0,0.1)]', 'border-x', 'border-black/5');
+            } else if (mode === 'desktop') {
+                wrapper.style.width = '1280px';
+                wrapper.classList.add('mx-auto');
+                body.style.overflowX = 'auto';
             }
+            
+            localStorage.setItem('classmaster_view_mode', mode);
+            updateViewModeButtons(mode);
+        }
+
+        function updateViewModeButtons(mode) {
+            ['auto', 'mobile', 'desktop'].forEach(m => {
+                const btn = document.getElementById(`btn-view-${m}`);
+                if (btn) {
+                    if (m === mode) {
+                        btn.classList.add('bg-primary', 'text-white');
+                        btn.classList.remove('text-on-surface-variant', 'hover:bg-black/5');
+                    } else {
+                        btn.classList.remove('bg-primary', 'text-white');
+                        btn.classList.add('text-on-surface-variant', 'hover:bg-black/5');
+                    }
+                }
+            });
         }
 
         function exportReport() {
-            const worksheet = XLSX.utils.json_to_sheet(students);
+            const exportData = students.map(s => ({
+                '学号': s.id,
+                '姓名': s.name,
+                '班级': s.className,
+                '分数': s.score,
+                '出勤状态': s.isPresent ? '已到' : '缺勤'
+            }));
+
+            const worksheet = XLSX.utils.json_to_sheet(exportData);
             const workbook = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(workbook, worksheet, "学生报表");
-            XLSX.writeFile(workbook, "ClassMaster_Report.xlsx");
+            XLSX.writeFile(workbook, `课堂表现报表_${new Date().toLocaleDateString()}.xlsx`);
         }
 
         function randomPick() {
-            if (students.length === 0) return;
-            const randomIndex = Math.floor(Math.random() * students.length);
-            const student = students[randomIndex];
+            const countInput = document.getElementById('pick-count');
+            const count = parseInt(countInput.value) || 1;
+            
+            const classFilter = document.getElementById('class-filter').value;
+            const noScoreFilter = document.getElementById('no-score-filter').checked;
+            
+            let pool = students.filter(s => s.isPresent);
+            
+            // Apply Class Filter
+            if (classFilter !== 'all') {
+                pool = pool.filter(s => {
+                    const classCode = s.id.length >= 6 ? s.id.slice(-6, -3) : '';
+                    return classCode === classFilter;
+                });
+            }
+            
+            // Apply Score Filter (Only pick students with 0 score)
+            if (noScoreFilter) {
+                pool = pool.filter(s => (s.score || 0) === 0);
+            }
+            
+            if (pool.length === 0) {
+                alert('当前筛选条件下没有符合条件的学生可供抽取！');
+                return;
+            }
+
+            const actualCount = Math.min(count, pool.length);
             
             // Create a custom modal for random pick
             const modal = document.createElement('div');
-            modal.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-6";
+            modal.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6";
+            
             modal.innerHTML = `
-                <div class="bg-white rounded-[2.5rem] p-12 max-w-sm w-full text-center space-y-6 shadow-2xl transform scale-90 animate-in fade-in zoom-in duration-300">
-                    <div class="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
-                        <i data-lucide="dices" class="text-primary w-12 h-12"></i>
+                <div class="bg-white rounded-[3rem] p-12 max-w-md w-full text-center space-y-8 shadow-2xl transform scale-90 animate-in fade-in zoom-in duration-300">
+                    <div class="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
+                        <i data-lucide="dices" class="text-primary w-10 h-10"></i>
                     </div>
-                    <div class="space-y-2">
-                        <h3 class="text-on-surface-variant font-bold uppercase tracking-widest text-xs">幸运学生</h3>
-                        <div class="text-4xl font-headline font-extrabold text-primary">${student.name}</div>
+                    <div class="space-y-4">
+                        <h3 id="pick-title" class="text-on-surface-variant font-bold uppercase tracking-[0.3em] text-[10px]">正在抽取...</h3>
+                        <div id="pick-results" class="flex flex-col items-center justify-center min-h-[100px]">
+                            <div class="text-5xl font-headline font-extrabold text-primary">...</div>
+                        </div>
                     </div>
-                    <button onclick="this.parentElement.parentElement.remove()" class="w-full py-4 bg-primary text-white rounded-xl font-bold shadow-lg shadow-primary/20 active:scale-95 transition-all">
+                    <button id="pick-btn" onclick="this.parentElement.parentElement.remove()" class="hidden w-full py-5 bg-primary text-white rounded-2xl font-headline font-bold shadow-lg shadow-primary/20 active:scale-95 transition-all">
                         太棒了！
                     </button>
                 </div>
             `;
             document.body.appendChild(modal);
             lucide.createIcons();
+
+            // Animation logic
+            let counter = 0;
+            const maxTicks = 20;
+            const interval = setInterval(() => {
+                const tempStudent = pool[Math.floor(Math.random() * pool.length)];
+                document.getElementById('pick-results').innerHTML = `
+                    <div class="text-5xl font-headline font-extrabold text-primary animate-pulse">${tempStudent.name}</div>
+                `;
+                counter++;
+                if (counter >= maxTicks) {
+                    clearInterval(interval);
+                    
+                    // Final selection
+                    const shuffled = [...pool].sort(() => 0.5 - Math.random());
+                    const selected = shuffled.slice(0, actualCount);
+                    
+                    let resultsHtml = '';
+                    selected.forEach(s => {
+                        const originalIndex = students.findIndex(student => student.id === s.id);
+                        resultsHtml += `
+                            <div class="picked-student-card w-full p-6 bg-primary/5 rounded-[2rem] border border-primary/10 flex flex-col items-center gap-4 transition-all duration-300">
+                                <div class="flex flex-col items-center">
+                                    <div class="text-3xl font-headline font-extrabold text-primary">${s.name}</div>
+                                    <div class="text-[10px] font-bold text-on-surface-variant/40 tracking-widest uppercase">${s.id}</div>
+                                </div>
+                                
+                                <div class="flex items-center gap-3 bg-white p-2 rounded-2xl shadow-sm border border-black/5">
+                                    <button onclick="updatePickedScore(${originalIndex}, -1, this)" class="w-10 h-10 rounded-xl bg-surface-container flex items-center justify-center hover:bg-red-50 hover:text-red-500 transition-colors active:scale-90">
+                                        <i data-lucide="minus" class="w-5 h-5"></i>
+                                    </button>
+                                    <div class="flex flex-col items-center px-2">
+                                        <span class="text-[8px] font-bold text-on-surface-variant/40 uppercase tracking-tighter">加减分值</span>
+                                        <input type="number" value="1" min="1" class="w-14 text-center font-headline font-bold text-primary text-xl bg-transparent border-none focus:ring-0 p-0">
+                                    </div>
+                                    <button onclick="updatePickedScore(${originalIndex}, 1, this)" class="w-10 h-10 rounded-xl bg-surface-container flex items-center justify-center hover:bg-green-50 hover:text-green-600 transition-colors active:scale-90">
+                                        <i data-lucide="plus" class="w-5 h-5"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    const resultsContainer = document.getElementById('pick-results');
+                    resultsContainer.className = "grid grid-cols-1 gap-6 w-full max-h-[50vh] overflow-y-auto p-4 custom-scrollbar";
+                    resultsContainer.innerHTML = resultsHtml;
+                    
+                    document.getElementById('pick-btn').classList.remove('hidden');
+                    document.getElementById('pick-title').innerText = `🎉 幸运学生 (${actualCount}人)`;
+                    lucide.createIcons();
+                }
+            }, 50);
         }
 
         // Start the app
         init();
     </script>
+    </div>
 </body>
 </html>
