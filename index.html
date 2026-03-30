@@ -45,7 +45,6 @@
             color: #1a1c1c;
             -webkit-font-smoothing: antialiased;
             /* Fix mobile scrolling lag */
-            overscroll-behavior-y: none;
             touch-action: pan-y;
             -webkit-overflow-scrolling: touch;
         }
@@ -57,7 +56,10 @@
         /* Smooth scrolling for all containers */
         .overflow-y-auto {
             -webkit-overflow-scrolling: touch !important;
-            scroll-behavior: smooth;
+        }
+
+        .is-mobile-view .overflow-y-auto {
+            scroll-behavior: auto !important;
         }
 
         #app-wrapper {
@@ -178,7 +180,22 @@
         }
         .is-mobile-view #dashboard-view h2 { font-size: 1.5rem !important; }
 
-        /* Scale modals and fix scrolling in mobile view */
+        /* Performance optimizations for mobile */
+        .is-mobile-view .decorative-blob { display: none !important; }
+        @media (max-width: 640px) { .decorative-blob { display: none !important; } }
+
+        .is-mobile-view .backdrop-blur-sm { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background-color: rgba(0, 0, 0, 0.85) !important; }
+        @media (max-width: 640px) { .backdrop-blur-sm { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background-color: rgba(0, 0, 0, 0.85) !important; } }
+
+        .is-mobile-view .backdrop-blur-md { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background-color: rgba(255, 255, 255, 0.95) !important; }
+        @media (max-width: 640px) { .backdrop-blur-md { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background-color: rgba(255, 255, 255, 0.95) !important; } }
+
+        .is-mobile-view .backdrop-blur-xl { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background-color: rgba(255, 255, 255, 0.9) !important; }
+        @media (max-width: 640px) { .backdrop-blur-xl { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background-color: rgba(255, 255, 255, 0.9) !important; } }
+
+        .is-mobile-view .student-card { transition: none !important; will-change: auto !important; }
+        @media (max-width: 640px) { .student-card { transition: none !important; will-change: auto !important; } }
+
         .is-mobile-view .fixed > div,
         @media (max-width: 640px) {
             .fixed > div {
@@ -188,12 +205,7 @@
                 max-height: 85vh !important;
                 overflow-y: auto !important;
                 -webkit-overflow-scrolling: touch !important;
-                /* Hardware acceleration for modal */
                 will-change: transform;
-            }
-            .backdrop-blur-sm {
-                backdrop-filter: none !important;
-                background-color: rgba(0, 0, 0, 0.85) !important;
             }
             .picked-student-card {
                 padding: 0.75rem !important;
@@ -215,11 +227,6 @@
                 padding: 0.5rem !important;
                 /* Ensure smooth scrolling in the results list */
                 -webkit-overflow-scrolling: touch !important;
-            }
-            
-            nav.backdrop-blur-md {
-                backdrop-filter: none !important;
-                background-color: rgba(255, 255, 255, 0.95) !important;
             }
         }
     </style>
