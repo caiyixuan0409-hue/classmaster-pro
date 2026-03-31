@@ -858,7 +858,8 @@
 
             const classFilter = document.getElementById('class-filter').value;
             const results = students.filter((s, index) => {
-                const matchesQuery = s.name.includes(query) || s.id.includes(query);
+                const shortId = s.id.length >= 3 ? s.id.slice(-3) : s.id;
+                const matchesQuery = s.name.includes(query) || shortId.includes(query);
                 const classCode = s.id.length >= 6 ? s.id.slice(-6, -3) : (s.className || '其他');
                 const matchesClass = classFilter === 'all' || classCode === classFilter;
                 return matchesQuery && matchesClass;
