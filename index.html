@@ -417,36 +417,8 @@
             </div>
 
             <!-- Student Grids by Class -->
-            <div id="class-sections" class="space-y-12">
-                <!-- Class 401 Section -->
-                <div id="section-401" class="space-y-6">
-                    <div class="flex items-center gap-4">
-                        <div class="h-px flex-grow bg-black/5"></div>
-                        <h3 class="font-headline font-extrabold text-2xl text-primary/40 uppercase tracking-widest">一班 (401)</h3>
-                        <div class="h-px flex-grow bg-black/5"></div>
-                    </div>
-                    <div id="student-grid-401" class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6"></div>
-                </div>
-
-                <!-- Class 402 Section -->
-                <div id="section-402" class="space-y-6">
-                    <div class="flex items-center gap-4">
-                        <div class="h-px flex-grow bg-black/5"></div>
-                        <h3 class="font-headline font-extrabold text-2xl text-primary/40 uppercase tracking-widest">二班 (402)</h3>
-                        <div class="h-px flex-grow bg-black/5"></div>
-                    </div>
-                    <div id="student-grid-402" class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6"></div>
-                </div>
-
-                <!-- Other Students Section -->
-                <div id="section-other" class="hidden space-y-6">
-                    <div class="flex items-center gap-4">
-                        <div class="h-px flex-grow bg-black/5"></div>
-                        <h3 class="font-headline font-extrabold text-2xl text-primary/40 uppercase tracking-widest">其他</h3>
-                        <div class="h-px flex-grow bg-black/5"></div>
-                    </div>
-                    <div id="student-grid-other" class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6"></div>
-                </div>
+            <div id="class-sections" class="space-y-12 w-full">
+                <!-- Dynamic sections will be injected here -->
             </div>
 
             <!-- History Section -->
@@ -566,8 +538,24 @@
             if (students && students.length > 0) {
                 renderDashboard();
             } else {
+                // Clear dashboard content when showing landing
+                const classSectionsContainer = document.getElementById('class-sections');
+                if (classSectionsContainer) classSectionsContainer.innerHTML = '';
                 showLanding();
             }
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `fixed bottom-8 left-1/2 -translate-x-1/2 z-[200] px-6 py-3 rounded-2xl shadow-2xl font-bold text-sm transform animate-in slide-in-from-bottom-4 duration-300 ${
+                type === 'error' ? 'bg-red-500 text-white' : 'bg-primary text-white'
+            }`;
+            toast.innerText = message;
+            document.body.appendChild(toast);
+            setTimeout(() => {
+                toast.classList.add('animate-out', 'fade-out', 'slide-out-to-bottom-4');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
         }
 
         function updateWorkspaceUI() {
@@ -676,51 +664,102 @@
 
         window.deleteWorkspace = function(id) {
             if (workspaces.length <= 1) {
-                alert('至少需要保留一个系统！如果您想清空当前系统，请使用“重置系统”功能。');
+                showToast('至少需要保留一个系统！如果您想清空当前系统，请使用“重置系统”功能。', 'error');
                 return;
             }
-            if (!confirm(`确定要删除系统 "${workspaces.find(w => w.id === id).name}" 吗？该系统的所有学生数据和历史记录都将永久丢失。`)) return;
             
-            workspaces = workspaces.filter(w => w.id !== id);
-            localStorage.setItem('classmaster_workspaces_v4', JSON.stringify(workspaces));
-            
-            // Clean up storage
-            localStorage.removeItem(`classmaster_students_${id}_v4`);
-            localStorage.removeItem(`classmaster_history_${id}_v4`);
-            localStorage.removeItem(`classmaster_last_reset_${id}_v4`);
-            
-            if (currentWorkspace === id) {
-                currentWorkspace = workspaces[0].id;
-                localStorage.setItem('classmaster_current_workspace_v4', currentWorkspace);
-            }
-            
-            const modal = document.querySelector('.fixed');
-            if (modal) modal.remove();
-            manageWorkspaces();
-            init();
+            const ws = workspaces.find(w => w.id === id);
+            const modal = document.createElement('div');
+            modal.className = "fixed inset-0 z-[150] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6";
+            modal.innerHTML = `
+                <div class="bg-white rounded-[2.5rem] p-10 max-w-sm w-full text-center space-y-6 shadow-2xl transform animate-in fade-in zoom-in duration-300">
+                    <div class="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto">
+                        <i data-lucide="trash-2" class="text-red-500 w-8 h-8"></i>
+                    </div>
+                    <div class="space-y-2">
+                        <h3 class="text-xl font-headline font-bold text-on-surface">删除系统？</h3>
+                        <p class="text-on-surface-variant text-sm">确定要删除系统 "<b>${ws.name}</b>" 吗？该系统的所有学生数据和历史记录都将永久丢失。</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <button onclick="this.closest('.fixed').remove()" class="flex-1 py-3 bg-surface-container text-on-surface-variant rounded-xl font-bold active:scale-95 transition-all">
+                            取消
+                        </button>
+                        <button id="confirm-delete-ws" class="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold shadow-lg shadow-red-200 active:scale-95 transition-all">
+                            确定删除
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            lucide.createIcons();
+
+            document.getElementById('confirm-delete-ws').onclick = () => {
+                workspaces = workspaces.filter(w => w.id !== id);
+                localStorage.setItem('classmaster_workspaces_v4', JSON.stringify(workspaces));
+                
+                // Clean up storage
+                localStorage.removeItem(`classmaster_students_${id}_v4`);
+                localStorage.removeItem(`classmaster_history_${id}_v4`);
+                localStorage.removeItem(`classmaster_last_reset_${id}_v4`);
+                
+                if (currentWorkspace === id) {
+                    currentWorkspace = workspaces[0].id;
+                    localStorage.setItem('classmaster_current_workspace_v4', currentWorkspace);
+                }
+                
+                modal.remove();
+                const manageModal = document.querySelector('.fixed');
+                if (manageModal) manageModal.remove();
+                manageWorkspaces();
+                init();
+            };
         };
 
         window.factoryReset = function() {
-            if (!confirm('警告：此操作将删除所有系统、所有学生名单和所有历史记录！确定要继续吗？')) return;
-            if (!confirm('再次确认：所有数据将无法找回。')) return;
-            
-            // Clear all localStorage keys starting with classmaster_
-            Object.keys(localStorage).forEach(key => {
-                if (key.startsWith('classmaster_')) {
-                    localStorage.removeItem(key);
-                }
-            });
-            
-            // Reset state
-            workspaces = [{id: 'default', name: '默认系统'}];
-            currentWorkspace = 'default';
-            students = [];
-            history = [];
-            
-            const modal = document.querySelector('.fixed');
-            if (modal) modal.remove();
-            
-            init();
+            const modal = document.createElement('div');
+            modal.className = "fixed inset-0 z-[150] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6";
+            modal.innerHTML = `
+                <div class="bg-white rounded-[2.5rem] p-10 max-w-sm w-full text-center space-y-6 shadow-2xl transform animate-in fade-in zoom-in duration-300">
+                    <div class="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto">
+                        <i data-lucide="refresh-ccw" class="text-red-500 w-8 h-8"></i>
+                    </div>
+                    <div class="space-y-2">
+                        <h3 class="text-xl font-headline font-bold text-on-surface">恢复出厂设置？</h3>
+                        <p class="text-on-surface-variant text-sm">警告：此操作将删除<b>所有系统</b>、所有学生名单和所有历史记录！确定要继续吗？</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <button onclick="this.closest('.fixed').remove()" class="flex-1 py-3 bg-surface-container text-on-surface-variant rounded-xl font-bold active:scale-95 transition-all">
+                            取消
+                        </button>
+                        <button id="confirm-factory-reset" class="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold shadow-lg shadow-red-200 active:scale-95 transition-all">
+                            确定清空
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            lucide.createIcons();
+
+            document.getElementById('confirm-factory-reset').onclick = () => {
+                // Clear all localStorage keys starting with classmaster_
+                Object.keys(localStorage).forEach(key => {
+                    if (key.startsWith('classmaster_')) {
+                        localStorage.removeItem(key);
+                    }
+                });
+                
+                // Reset state
+                workspaces = [{id: 'default', name: '默认系统'}];
+                currentWorkspace = 'default';
+                students = [];
+                history = [];
+                
+                modal.remove();
+                const manageModal = document.querySelector('.fixed');
+                if (manageModal) manageModal.remove();
+                
+                init();
+            };
         };
 
         function showLanding() {
@@ -738,12 +777,7 @@
             document.getElementById('deco-left').classList.add('hidden');
             document.getElementById('deco-right').classList.add('hidden');
             
-            const grid401 = document.getElementById('student-grid-401');
-            const grid402 = document.getElementById('student-grid-402');
-            const gridOther = document.getElementById('student-grid-other');
-            const section401 = document.getElementById('section-401');
-            const section402 = document.getElementById('section-402');
-            const sectionOther = document.getElementById('section-other');
+            const classSectionsContainer = document.getElementById('class-sections');
             const countEl = document.getElementById('student-count');
             
             // Update Class Filter Options Dynamically
@@ -755,25 +789,17 @@
             }))].sort();
 
             classFilter.innerHTML = '<option value="all">全部班级</option>' + 
-                classes.map(c => `<option value="${c}">${c === '401' ? '一班 (401)' : (c === '402' ? '二班 (402)' : c)}</option>`).join('');
+                classes.map(c => `<option value="${c}">${c}</option>`).join('');
             classFilter.value = currentFilterValue;
             if (classFilter.value === '') classFilter.value = 'all';
 
             const presentCount = students.filter(s => s.isPresent).length;
             countEl.innerText = `${presentCount} / ${students.length}`;
             
-            grid401.innerHTML = '';
-            grid402.innerHTML = '';
-            gridOther.innerHTML = '';
-            
-            section401.classList.remove('hidden');
-            section402.classList.remove('hidden');
-            sectionOther.classList.add('hidden');
+            classSectionsContainer.innerHTML = '';
 
-            let has401 = false;
-            let has402 = false;
-            let hasOther = false;
-
+            // Group students by class
+            const groupedStudents = {};
             students.forEach((student, index) => {
                 const classCode = student.id.length >= 6 ? student.id.slice(-6, -3) : (student.className || '其他');
                 
@@ -781,23 +807,31 @@
                 const selectedClass = classFilter.value;
                 if (selectedClass !== 'all' && classCode !== selectedClass) return;
 
-                const card = createStudentCard(student, index);
-                
-                if (classCode === '401') {
-                    grid401.appendChild(card);
-                    has401 = true;
-                } else if (classCode === '402') {
-                    grid402.appendChild(card);
-                    has402 = true;
-                } else {
-                    gridOther.appendChild(card);
-                    hasOther = true;
+                if (!groupedStudents[classCode]) {
+                    groupedStudents[classCode] = [];
                 }
+                groupedStudents[classCode].push({ student, index });
             });
 
-            section401.classList.toggle('hidden', !has401);
-            section402.classList.toggle('hidden', !has402);
-            sectionOther.classList.toggle('hidden', !hasOther);
+            // Render each class section
+            Object.keys(groupedStudents).sort().forEach(classCode => {
+                const section = document.createElement('div');
+                section.className = "space-y-6";
+                section.innerHTML = `
+                    <div class="flex items-center gap-4">
+                        <div class="h-px flex-grow bg-black/5"></div>
+                        <h3 class="font-headline font-extrabold text-2xl text-primary/40 uppercase tracking-widest">${classCode}</h3>
+                        <div class="h-px flex-grow bg-black/5"></div>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6"></div>
+                `;
+                const grid = section.querySelector('.grid');
+                groupedStudents[classCode].forEach(({ student, index }) => {
+                    const card = createStudentCard(student, index);
+                    grid.appendChild(card);
+                });
+                classSectionsContainer.appendChild(section);
+            });
             
             lucide.createIcons();
             renderHistory();
@@ -809,7 +843,7 @@
             
             const classCode = student.id.length >= 6 ? student.id.slice(-6, -3) : '';
             const studentNum = student.id.length >= 3 ? student.id.slice(-3) : '';
-            const classNameDisplay = classCode === '401' ? '一班' : (classCode === '402' ? '二班' : (student.className || ''));
+            const classNameDisplay = student.className || classCode || '';
             
             card.innerHTML = `
                 <!-- Delete Button -->
@@ -897,9 +931,12 @@
 
             const grid = modal.querySelector('#search-results-grid');
             results.forEach(student => {
-                const originalIndex = students.findIndex(s => s.id === student.id);
-                const card = createStudentCard(student, originalIndex, true);
-                grid.appendChild(card);
+                // Use both ID and Name to find the correct index in the original students array
+                const originalIndex = students.findIndex(s => s.id === student.id && s.name === student.name);
+                if (originalIndex !== -1) {
+                    const card = createStudentCard(student, originalIndex, true);
+                    grid.appendChild(card);
+                }
             });
 
             lucide.createIcons();
@@ -912,7 +949,7 @@
                 return;
             }
 
-            historyList.innerHTML = history.map(item => `
+            historyList.innerHTML = history.map((item, idx) => `
                 <div class="flex items-center justify-between p-4 bg-white/60 rounded-2xl border border-black/5 shadow-sm hover:shadow-md transition-all">
                     <div class="flex items-center gap-4">
                         <div class="w-10 h-10 rounded-xl ${item.type === 'score' ? 'bg-primary/10 text-primary' : 'bg-secondary-container/20 text-on-secondary-container'} flex items-center justify-center">
@@ -923,10 +960,17 @@
                             <div class="text-[10px] font-bold text-on-surface-variant/40 uppercase tracking-widest">${item.action}</div>
                         </div>
                     </div>
-                    <div class="text-right">
+                    <div class="text-right flex flex-col items-end gap-1">
                         <div class="text-[10px] font-bold text-on-surface-variant/60">${item.timestamp}</div>
-                        <div class="text-xs font-bold ${item.value > 0 ? 'text-green-600' : (item.value < 0 ? 'text-red-500' : 'text-primary')}">
-                            ${item.value !== undefined ? (item.value > 0 ? '+' + item.value : item.value) : ''}
+                        <div class="flex items-center gap-2">
+                            ${item.canUndo ? `
+                                <button onclick="undoAction(${idx})" class="text-[10px] font-bold text-primary hover:underline bg-primary/5 px-2 py-0.5 rounded-md transition-all active:scale-90">
+                                    撤销
+                                </button>
+                            ` : ''}
+                            <div class="text-xs font-bold ${item.value > 0 ? 'text-green-600' : (item.value < 0 ? 'text-red-500' : 'text-primary')}">
+                                ${item.value !== undefined ? (item.value > 0 ? '+' + item.value : item.value) : ''}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -934,12 +978,16 @@
             lucide.createIcons();
         }
 
-        function addHistoryEntry(studentName, type, action, value) {
+        function addHistoryEntry(studentName, type, action, value, studentId = null, studentData = null, originalIndex = null) {
             const entry = {
                 studentName,
+                studentId,
                 type,
                 action,
                 value,
+                studentData,
+                originalIndex,
+                canUndo: (type === 'score' || type === 'attendance' || action === '删除学生'),
                 timestamp: new Date().toLocaleString('zh-CN', { 
                     year: 'numeric', month: '2-digit', day: '2-digit', 
                     hour: '2-digit', minute: '2-digit', second: '2-digit' 
@@ -950,6 +998,45 @@
             if (history.length > 500) history = history.slice(0, 500);
             saveAndRender();
         }
+
+        window.undoAction = function(index) {
+            const item = history[index];
+            if (!item || !item.canUndo) return;
+
+            if (item.type === 'score') {
+                // Use both ID and Name to find the correct student, especially for 'N/A' IDs
+                const student = students.find(s => s.id === item.studentId && s.name === item.studentName);
+                if (student) {
+                    student.score -= item.value;
+                } else {
+                    showToast(`找不到学生 ${item.studentName}，撤销失败。`, 'error');
+                    return;
+                }
+            } else if (item.type === 'attendance') {
+                const student = students.find(s => s.id === item.studentId && s.name === item.studentName);
+                if (student) {
+                    student.isPresent = !student.isPresent;
+                } else {
+                    showToast(`找不到学生 ${item.studentName}，撤销失败。`, 'error');
+                    return;
+                }
+            } else if (item.action === '删除学生') {
+                // For deletion, we restore the student to their original position
+                if (item.studentData) {
+                    const insertIndex = (item.originalIndex !== null && item.originalIndex <= students.length) 
+                        ? item.originalIndex 
+                        : students.length;
+                    students.splice(insertIndex, 0, item.studentData);
+                } else {
+                    showToast('撤销失败：丢失学生数据。', 'error');
+                    return;
+                }
+            }
+
+            // Remove this item from history
+            history.splice(index, 1);
+            saveAndRender();
+        };
 
         // Excel Import Logic
         document.getElementById('file-input').addEventListener('change', function(e) {
@@ -983,7 +1070,7 @@
                 if (students.length > 0) {
                     saveAndRender();
                 } else {
-                    alert('未能识别到学生名单，请确保表格格式正确：第一列学号，第二列姓名，第三列班级。');
+                    showToast('未能识别到学生名单，请确保表格格式正确：第一列学号，第二列姓名，第三列班级。', 'error');
                 }
             };
             reader.readAsArrayBuffer(file);
@@ -993,7 +1080,7 @@
             if (event) event.stopPropagation();
             const student = students[index];
             student.score = (student.score || 0) + delta;
-            addHistoryEntry(student.name, 'score', delta > 0 ? '加分' : '减分', delta);
+            addHistoryEntry(student.name, 'score', delta > 0 ? '加分' : '减分', delta, student.id);
             
             // If search modal is open, refresh it
             const searchModal = document.getElementById('search-results-modal');
@@ -1007,7 +1094,7 @@
             if (event) event.stopPropagation();
             const student = students[index];
             student.isPresent = !student.isPresent;
-            addHistoryEntry(student.name, 'attendance', student.isPresent ? '签到' : '缺勤', undefined);
+            addHistoryEntry(student.name, 'attendance', student.isPresent ? '签到' : '缺勤', undefined, student.id);
             
             // If search modal is open, refresh it
             const searchModal = document.getElementById('search-results-modal');
@@ -1029,7 +1116,7 @@
             const delta = amount * direction;
             const student = students[index];
             student.score = (student.score || 0) + delta;
-            addHistoryEntry(student.name, 'score', delta > 0 ? '随机加分' : '随机减分', delta);
+            addHistoryEntry(student.name, 'score', delta > 0 ? '随机加分' : '随机减分', delta, student.id);
             
             // Visual feedback
             const container = btn.closest('.picked-student-card');
@@ -1069,7 +1156,7 @@
             lucide.createIcons();
 
             document.getElementById('confirm-delete').onclick = () => {
-                addHistoryEntry(student.name, 'system', '删除学生', undefined);
+                addHistoryEntry(student.name, 'system', '删除学生', undefined, student.id, {...student}, index);
                 students.splice(index, 1);
                 saveAndRender();
                 modal.remove();
@@ -1186,7 +1273,7 @@
             }
             
             if (pool.length === 0) {
-                alert('当前筛选条件下没有符合条件的学生可供抽取！');
+                showToast('当前筛选条件下没有符合条件的学生可供抽取！', 'error');
                 return;
             }
 
@@ -1233,7 +1320,7 @@
             
             let resultsHtml = '';
             selected.forEach(s => {
-                const originalIndex = students.findIndex(student => student.id === s.id);
+                const originalIndex = students.findIndex(student => student.id === s.id && student.name === s.name);
                 resultsHtml += `
                     <div class="picked-student-card w-full p-4 sm:p-6 bg-primary/5 rounded-[1.5rem] sm:rounded-[2rem] border border-primary/10 flex flex-col items-center gap-2 sm:gap-4 transition-all duration-300">
                         <div class="flex flex-col items-center">
