@@ -26,7 +26,8 @@ import {
   UserCheck,
   UserX,
   Menu,
-  X
+  X,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -173,6 +174,7 @@ export default function App() {
   const [selectedClass, setSelectedClass] = useState<string>('All');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [operatorName, setOperatorName] = useState<string>(() => {
     return localStorage.getItem('operator_name') || '';
   });
@@ -258,54 +260,69 @@ export default function App() {
   const leaveRoom = () => {
     setRoomId(null);
     setStudents([]);
+    setHistory([]);
     setJoinInput('');
     // We don't necessarily clear operator_name here as per requirements, 
     // but if they join another room they might want to change it.
     // However, requirements say "if not stored, pop dialog".
   };
 
+  const fetchStudents = React.useCallback(async () => {
+    if (!roomId || !supabase) {
+      console.log('fetchStudents skipped: roomId or supabase missing', { roomId, hasSupabase: !!supabase });
+      return;
+    }
+    
+    console.log('fetchStudents started for room:', roomId);
+    setLoading(true);
+    try {
+      const [studentsRes, historyRes] = await Promise.all([
+        supabase
+          .from('students')
+          .select('*')
+          .eq('room_id', roomId)
+          .order('student_id', { ascending: true }),
+        supabase
+          .from('history')
+          .select('*')
+          .eq('room_id', roomId)
+          .order('timestamp', { ascending: false })
+          .limit(50)
+      ]);
+
+      if (studentsRes.error) {
+        console.error('Fetch students error:', studentsRes.error);
+      } else {
+        console.log('Students fetched:', studentsRes.data?.length);
+        setStudents(studentsRes.data || []);
+      }
+
+      if (historyRes.error) {
+        console.error('Fetch history error:', historyRes.error);
+      } else {
+        console.log('History fetched:', historyRes.data?.length);
+        if (historyRes.data && historyRes.data.length > 0) {
+          console.log('First history entry sample:', historyRes.data[0]);
+        }
+        setHistory(historyRes.data || []);
+      }
+    } catch (err) {
+      console.error('Unexpected fetch error:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [roomId, supabase]);
+
   // --- Data Fetching & Real-time ---
   useEffect(() => {
     if (!roomId || !supabase) return;
 
-    const fetchStudents = async () => {
-      if (!roomId || !supabase) return;
-      
-      setLoading(true);
-      try {
-        const [studentsRes, historyRes] = await Promise.all([
-          supabase
-            .from('students')
-            .select('*')
-            .eq('room_id', roomId)
-            .order('student_id', { ascending: true }),
-          supabase
-            .from('history')
-            .select('*')
-            .eq('room_id', roomId)
-            .order('timestamp', { ascending: false })
-            .limit(50)
-        ]);
-
-        if (studentsRes.error) console.error('Fetch students error:', studentsRes.error);
-        else setStudents(studentsRes.data || []);
-
-        if (historyRes.error) {
-          console.error('Fetch history error:', historyRes.error);
-          // If table doesn't exist, we'll just have empty history
-        } else {
-          setHistory(historyRes.data || []);
-        }
-      } catch (err) {
-        console.error('Unexpected fetch error:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
+    console.log('Fetching data for room:', roomId);
     fetchStudents();
 
     // Subscribe to real-time changes
+    // User requested to remove instant sync for students list, only sync via history
+    /*
     const studentsChannel = supabase
       .channel(`room-${roomId}-students`)
       .on(
@@ -331,9 +348,10 @@ export default function App() {
         }
       )
       .subscribe();
+    */
 
     const historyChannel = supabase
-      .channel(`room-${roomId}-history`)
+      .channel(`room-${roomId}-history-sync`)
       .on(
         'postgres_changes',
         {
@@ -343,11 +361,37 @@ export default function App() {
           filter: `room_id=eq.${roomId}`
         },
         (payload) => {
+          console.log('Realtime history insert event received:', payload.new);
           setHistory(prev => {
-            // Avoid duplicates from manual optimistic updates
-            if (prev.find(h => h.id === payload.new.id)) return prev;
+            const exists = prev.some(h => h.id === payload.new.id);
+            if (exists) {
+              console.log('History entry already exists in state, skipping:', payload.new.id);
+              return prev;
+            }
+            console.log('Adding new history entry to state:', payload.new.id);
             return [payload.new as HistoryEntry, ...prev].slice(0, 50);
           });
+          
+          // Also update the student score in the list if it's a score change
+          if (payload.new.action === 'score_change') {
+            try {
+              const details = typeof payload.new.details === 'string' ? JSON.parse(payload.new.details) : payload.new.details;
+              setStudents(prev => prev.map(s => 
+                s.student_id === payload.new.student_id 
+                  ? { ...s, score: details.newScore } 
+                  : s
+              ));
+            } catch (e) {
+              console.error('Error parsing history details for sync:', e);
+            }
+          } else if (payload.new.action === 'add' || payload.new.action === 'delete') {
+            if (payload.new.action === 'delete') {
+              setStudents(prev => prev.filter(s => s.student_id !== payload.new.student_id));
+            } else {
+              // For add, we should probably refetch to get the full student object
+              fetchStudents();
+            }
+          }
         }
       )
       .on(
@@ -359,20 +403,122 @@ export default function App() {
           filter: `room_id=eq.${roomId}`
         },
         (payload) => {
+          console.log('Realtime history delete event received:', payload.old);
           setHistory(prev => prev.filter(h => h.id !== payload.old.id));
         }
       )
-      .subscribe((status) => {
-        if (status !== 'SUBSCRIBED') {
-          console.warn('History Realtime subscription status:', status);
-        }
+      .subscribe((status, err) => {
+        console.log(`History sync status: ${status}`, err || '');
       });
 
     return () => {
-      supabase.removeChannel(studentsChannel);
+      // supabase.removeChannel(studentsChannel);
       supabase.removeChannel(historyChannel);
     };
-  }, [roomId]);
+  }, [roomId, fetchStudents]);
+
+  useEffect(() => {
+    if (history.length > 0) {
+      console.log('History state updated. Current entries:', history.length);
+    }
+  }, [history]);
+
+  const renderHistoryList = () => {
+    if (history.length === 0) {
+      return <p className="text-[10px] text-slate-400 text-center py-4 italic">暂无操作记录</p>;
+    }
+
+    return (
+      <AnimatePresence initial={false}>
+        {history.map(entry => {
+          const isMe = entry.operator === operatorName;
+          const displayName = isMe ? '你' : (entry.operator || '未知');
+          
+          let actionText = '';
+          let scoreBadge = null;
+          
+          try {
+            const details = typeof entry.details === 'string' ? JSON.parse(entry.details) : (entry.details || {});
+            if (entry.action === 'score_change') {
+              const delta = (details.newScore ?? 0) - (details.prevScore ?? 0);
+              actionText = `${entry.student_name || '学生'} ${delta >= 0 ? '加' : '减'}${Math.abs(delta)}分`;
+              scoreBadge = (
+                <span className={cn(
+                  "text-[8px] font-bold px-1 rounded",
+                  delta >= 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                )}>
+                  {delta > 0 ? `+${delta}` : delta}
+                </span>
+              );
+            } else if (entry.action === 'add') {
+              if (entry.student_id === 'BATCH_IMPORT') {
+                actionText = `批量导入了 ${details.count || 0} 名学生`;
+              } else {
+                actionText = `添加了 ${entry.student_name || '学生'}`;
+              }
+            } else if (entry.action === 'delete') {
+              actionText = `删除了 ${entry.student_name || '学生'}`;
+            } else if (entry.action === 'attendance_change') {
+              actionText = `修改了 ${entry.student_name || '学生'} 出勤`;
+            } else if (entry.action === 'edit') {
+              actionText = `编辑了 ${entry.student_name || '学生'} 信息`;
+            } else {
+              actionText = entry.action || '未知操作';
+            }
+          } catch (e) {
+            console.error('Error parsing history entry:', e, entry);
+            actionText = entry.action === 'delete' ? '删除学生' : '操作记录';
+          }
+
+          const timeStr = (() => {
+            try {
+              if (!entry.timestamp) return '未知时间';
+              return new Date(entry.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            } catch (e) {
+              return '格式错误';
+            }
+          })();
+
+          return (
+            <motion.div 
+              key={entry.id || Math.random()}
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="p-2 bg-white rounded-lg border border-slate-100 group relative shadow-sm hover:shadow-md transition-all mb-2"
+            >
+              <div className="flex justify-between items-start mb-0.5">
+                <div className="flex items-center gap-1 flex-1 min-w-0">
+                  <span className={cn(
+                    "text-[10px] font-bold truncate",
+                    isMe ? "text-indigo-600" : "text-slate-700"
+                  )}>
+                    {displayName}
+                  </span>
+                  <span className="text-[9px] text-slate-500 flex-1 truncate">
+                    {actionText}
+                  </span>
+                </div>
+                <span className="text-[8px] text-slate-400 whitespace-nowrap ml-1">
+                  {timeStr}
+                </span>
+              </div>
+              <div className="flex items-center justify-between mt-1">
+                <div className="flex items-center gap-2">
+                  {scoreBadge}
+                </div>
+                <button 
+                  onClick={() => undoHistory(entry)}
+                  className="text-[9px] text-red-500 hover:text-red-700 font-bold opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  撤销
+                </button>
+              </div>
+            </motion.div>
+          );
+        })}
+      </AnimatePresence>
+    );
+  };
 
   // --- Student Operations ---
   const upsertStudent = async (studentData: Partial<Student>, skipHistory = false) => {
@@ -395,30 +541,55 @@ export default function App() {
       // Record history
       const original = studentData.id ? students.find(s => s.id === studentData.id) : null;
       
+      let action: 'add' | 'score_change' | 'attendance_change' | 'edit' = 'add';
+      if (studentData.id) {
+        if (studentData.is_present !== undefined && original && studentData.is_present !== original.is_present) {
+          action = 'attendance_change';
+        } else if (studentData.score !== undefined && original && studentData.score !== original.score) {
+          action = 'score_change';
+        } else {
+          action = 'edit';
+        }
+      }
+
       const newEntry: Partial<HistoryEntry> = {
         room_id: roomId,
         student_id: studentData.student_id || (original?.student_id),
         student_name: studentData.name || (original?.name),
-        action: studentData.id ? 'score_change' : 'add',
+        action: action,
         details: JSON.stringify({
           prevScore: original?.score || 0,
-          newScore: studentData.score,
+          newScore: studentData.score !== undefined ? studentData.score : (original?.score || 0),
           prevPresent: original?.is_present ?? true,
-          newPresent: studentData.is_present ?? true,
+          newPresent: studentData.is_present !== undefined ? studentData.is_present : (original?.is_present ?? true),
           isNew: !studentData.id
         }),
         timestamp: new Date().toISOString(),
         operator: operatorName
       };
       
+      console.log('Inserting history entry:', newEntry);
       const { data, error: histError } = await supabase
         .from('history')
         .insert(newEntry)
         .select()
         .single();
         
-      if (!histError && data) {
-        setHistory(prev => [data as HistoryEntry, ...prev].slice(0, 50));
+      if (histError) {
+        console.error('Error inserting history entry:', histError);
+        // Fallback: add to local state anyway with a temporary ID if insert failed but we want to show something
+        // Actually, if insert failed, it won't be in DB, so maybe don't show it.
+        // But let's at least log it clearly.
+      } else if (data) {
+        console.log('History entry inserted successfully, updating local state:', data.id);
+        setHistory(prev => {
+          if (prev.some(h => h.id === data.id)) return prev;
+          return [data as HistoryEntry, ...prev].slice(0, 50);
+        });
+      } else {
+        // If no data but no error, maybe RLS prevented select?
+        console.warn('History insert succeeded but no data returned. Refetching history...');
+        fetchStudents();
       }
     }
   };
@@ -452,8 +623,17 @@ export default function App() {
         .select()
         .single();
         
-      if (!histError && data) {
-        setHistory(prev => [data as HistoryEntry, ...prev].slice(0, 50));
+      if (histError) {
+        console.error('Error inserting history entry for delete:', histError);
+      } else if (data) {
+        console.log('Delete history entry inserted successfully:', data.id);
+        setHistory(prev => {
+          if (prev.some(h => h.id === data.id)) return prev;
+          return [data as HistoryEntry, ...prev].slice(0, 50);
+        });
+      } else {
+        console.warn('Delete history insert succeeded but no data returned. Refetching history...');
+        fetchStudents();
       }
     }
   };
@@ -577,7 +757,17 @@ export default function App() {
 
       if (error) throw error;
 
+      // Update local state for students
+      setStudents(prev => prev.map(s => {
+        const update = updates.find(u => u.student_id === s.student_id);
+        if (update) {
+          return { ...s, score: update.score };
+        }
+        return s;
+      }));
+
       // Record in history for each
+      const newHistoryEntries: HistoryEntry[] = [];
       for (const student of selectedBatchStudents) {
         const newEntry: Partial<HistoryEntry> = {
           room_id: roomId,
@@ -586,13 +776,32 @@ export default function App() {
           action: 'score_change',
           details: JSON.stringify({
             prevScore: student.score,
-            newScore: student.score + batchScoreDelta,
+            newScore: Math.max(0, student.score + batchScoreDelta),
             isBatch: true
           }),
           timestamp: new Date().toISOString(),
           operator: operatorName
         };
-        await supabase.from('history').insert(newEntry);
+        
+        const { data, error: histError } = await supabase
+          .from('history')
+          .insert(newEntry)
+          .select()
+          .single();
+          
+        if (!histError && data) {
+          newHistoryEntries.push(data as HistoryEntry);
+        } else if (histError) {
+          console.error('Batch history insert error:', histError);
+        }
+      }
+
+      if (newHistoryEntries.length > 0) {
+        setHistory(prev => {
+          const combined = [...newHistoryEntries, ...prev];
+          // Sort by timestamp descending
+          return combined.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 50);
+        });
       }
 
       alert(`✅ 成功为 ${selectedBatchStudents.length} 名学生更新分数！`);
@@ -1013,89 +1222,24 @@ export default function App() {
           ))}
 
           <div className="mt-8">
-            <p className="px-3 py-2 text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-              <History className="w-3 h-3" /> 操作历史
+            <p className="px-3 py-2 text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between group">
+              <span className="flex items-center gap-2">
+                <History className="w-3 h-3" /> 操作历史
+              </span>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fetchStudents();
+                }}
+                className="p-1 hover:bg-slate-100 rounded text-slate-300 hover:text-slate-600 transition-colors"
+                title="刷新历史"
+              >
+                <RefreshCw className={cn("w-3 h-3", loading && "animate-spin")} />
+              </button>
             </p>
             <div className="space-y-2 px-2 max-h-64 overflow-y-auto custom-scrollbar">
-              {history.length === 0 ? (
-                <p className="text-[10px] text-slate-400 text-center py-4 italic">暂无操作记录</p>
-              ) : (
-                <AnimatePresence initial={false}>
-                  {history.map(entry => {
-                    const isMe = entry.operator === operatorName;
-                    const displayName = isMe ? '你' : (entry.operator || '未知');
-                    
-                    let actionText = '';
-                    let scoreBadge = null;
-                    
-                    try {
-                      const details = JSON.parse(entry.details);
-                      if (entry.action === 'score_change') {
-                        const delta = (details.newScore ?? 0) - (details.prevScore ?? 0);
-                        const deltaText = delta > 0 ? `+${delta}` : `${delta}`;
-                        actionText = `${entry.student_name} ${delta >= 0 ? '加' : '减'}${Math.abs(delta)}分`;
-                        scoreBadge = (
-                          <span className={cn(
-                            "text-[8px] font-bold px-1 rounded",
-                            delta >= 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                          )}>
-                            {deltaText}
-                          </span>
-                        );
-                      } else if (entry.action === 'add') {
-                        if (entry.student_id === 'BATCH_IMPORT') {
-                          actionText = `批量导入了 ${details.count} 名学生`;
-                        } else {
-                          actionText = `添加了 ${entry.student_name}`;
-                        }
-                      } else if (entry.action === 'delete') {
-                        actionText = `删除了 ${entry.student_name}`;
-                      } else if (entry.action === 'attendance_change') {
-                        actionText = `修改了 ${entry.student_name} 出勤`;
-                      }
-                    } catch (e) {
-                      actionText = entry.action === 'delete' ? '删除学生' : '分数变动';
-                    }
-
-                    return (
-                      <motion.div 
-                        key={entry.id}
-                        initial={{ opacity: 0, y: -10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="p-2 bg-white rounded-lg border border-slate-100 group relative shadow-sm hover:shadow-md transition-all"
-                      >
-                        <div className="flex justify-between items-start mb-0.5">
-                          <div className="flex items-center gap-1 flex-1 min-w-0">
-                            <span className={cn(
-                              "text-[10px] font-bold truncate",
-                              isMe ? "text-indigo-600" : "text-slate-700"
-                            )}>
-                              {displayName}
-                            </span>
-                            <span className="text-[9px] text-slate-500 flex-1 truncate">
-                              {actionText}
-                            </span>
-                          </div>
-                          <span className="text-[8px] text-slate-400 whitespace-nowrap ml-1">
-                            {new Date(entry.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between mt-1">
-                          <div className="flex items-center gap-2">
-                            {scoreBadge}
-                          </div>
-                          <button 
-                            onClick={() => undoHistory(entry)}
-                            className="text-[9px] text-red-500 hover:text-red-700 font-bold opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            撤销
-                          </button>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </AnimatePresence>
-              )}
+              {console.log('Rendering history list, length:', history.length)}
+              {renderHistoryList()}
             </div>
           </div>
         </div>
@@ -1113,12 +1257,21 @@ export default function App() {
         {/* Header */}
         <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 sm:py-4 flex flex-col gap-3 z-10">
           <div className="flex items-center justify-between gap-4">
-            <button 
-              onClick={() => setIsSidebarOpen(true)}
-              className="p-2 hover:bg-slate-100 text-slate-600 md:hidden rounded-xl bg-slate-50"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2 md:hidden">
+              <button 
+                onClick={() => setIsSidebarOpen(true)}
+                className="p-2 hover:bg-slate-100 text-slate-600 rounded-xl bg-slate-50"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+              <button 
+                onClick={() => setIsHistoryModalOpen(true)}
+                className="p-2 hover:bg-slate-100 text-slate-600 rounded-xl bg-slate-50"
+                title="查看历史"
+              >
+                <History className="w-5 h-5" />
+              </button>
+            </div>
 
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -1699,6 +1852,52 @@ export default function App() {
           </div>
         )}
       </Modal>
+      {/* History Modal for Mobile */}
+      <AnimatePresence>
+        {isHistoryModalOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] lg:hidden flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={() => setIsHistoryModalOpen(false)}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <h2 className="font-bold flex items-center gap-2 text-slate-800">
+                  <History className="w-4 h-4 text-indigo-500" /> 操作历史
+                </h2>
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={fetchStudents}
+                    className="p-2 hover:bg-slate-200 rounded-lg text-slate-500 transition-colors"
+                  >
+                    <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+                  </button>
+                  <button 
+                    onClick={() => setIsHistoryModalOpen(false)} 
+                    className="p-2 hover:bg-slate-200 rounded-lg text-slate-400 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-white">
+                {renderHistoryList()}
+              </div>
+              <div className="p-3 border-t border-slate-100 bg-slate-50 text-center">
+                <p className="text-[10px] text-slate-400">点击背景或右上角关闭</p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
