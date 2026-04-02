@@ -1,0 +1,5 @@
+{
+  "name": "Supabase Realtime Classroom",
+  "description": "A real-time classroom management system with cloud synchronization via Supabase.",
+  "requestFramePermissions": []
+}
