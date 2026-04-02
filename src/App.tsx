@@ -60,11 +60,13 @@ interface Student {
 
 interface HistoryEntry {
   id: string;
+  room_id: string;
   student_id: string;
   student_name: string;
   action: 'score_change' | 'attendance_change' | 'edit' | 'add' | 'delete';
   details: string;
   timestamp: string;
+  operator?: string;
 }
 
 // --- Components ---
@@ -171,17 +173,28 @@ export default function App() {
   const [selectedClass, setSelectedClass] = useState<string>('All');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [operatorName, setOperatorName] = useState<string>(() => {
+    return localStorage.getItem('operator_name') || '';
+  });
+  const [isOperatorModalOpen, setIsOperatorModalOpen] = useState(false);
+  const [tempOperatorName, setTempOperatorName] = useState('');
   
   // Random Draw State
   const [isDrawModalOpen, setIsDrawModalOpen] = useState(false);
   const [drawResults, setDrawResults] = useState<Student[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [hasDrawn, setHasDrawn] = useState(false);
   const [drawFilters, setDrawFilters] = useState({
     className: 'All',
     onlyZeroScore: false,
     count: 1
   });
-  const [customScore, setCustomScore] = useState(1);
+
+  // Batch Score State
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [batchSearchQuery, setBatchSearchQuery] = useState('');
+  const [selectedBatchStudents, setSelectedBatchStudents] = useState<Student[]>([]);
+  const [batchScoreDelta, setBatchScoreDelta] = useState(1);
 
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -223,6 +236,8 @@ export default function App() {
   // --- Room Logic ---
   const createRoom = () => {
     const newId = Math.floor(100000 + Math.random() * 900000).toString();
+    setOperatorName('老师');
+    localStorage.setItem('operator_name', '老师');
     setRoomId(newId);
   };
 
@@ -230,6 +245,13 @@ export default function App() {
     const targetId = id || joinInput;
     if (targetId.length === 6) {
       setRoomId(targetId);
+      // Check if identity exists
+      const savedName = localStorage.getItem('operator_name');
+      if (!savedName) {
+        setIsOperatorModalOpen(true);
+      } else {
+        setOperatorName(savedName);
+      }
     }
   };
 
@@ -237,6 +259,9 @@ export default function App() {
     setRoomId(null);
     setStudents([]);
     setJoinInput('');
+    // We don't necessarily clear operator_name here as per requirements, 
+    // but if they join another room they might want to change it.
+    // However, requirements say "if not stored, pop dialog".
   };
 
   // --- Data Fetching & Real-time ---
@@ -247,25 +272,29 @@ export default function App() {
       if (!roomId || !supabase) return;
       
       setLoading(true);
-      console.log('Current Room ID:', roomId);
-      console.log('Fetching students for room:', roomId);
-      
       try {
-        const { data, error } = await supabase
-          .from('students')
-          .select('*')
-          .eq('room_id', roomId)
-          .order('student_id', { ascending: true });
+        const [studentsRes, historyRes] = await Promise.all([
+          supabase
+            .from('students')
+            .select('*')
+            .eq('room_id', roomId)
+            .order('student_id', { ascending: true }),
+          supabase
+            .from('history')
+            .select('*')
+            .eq('room_id', roomId)
+            .order('timestamp', { ascending: false })
+            .limit(50)
+        ]);
 
-        if (error) {
-          console.error('Fetch error:', error);
-          // 如果是 RLS 错误，通常会提示
-          if (error.code === '42501') {
-            alert('⚠️ 权限不足：请确保您已在 Supabase SQL Editor 中运行了建表和 Policy 语句。');
-          }
+        if (studentsRes.error) console.error('Fetch students error:', studentsRes.error);
+        else setStudents(studentsRes.data || []);
+
+        if (historyRes.error) {
+          console.error('Fetch history error:', historyRes.error);
+          // If table doesn't exist, we'll just have empty history
         } else {
-          console.log('Fetched students count:', data?.length || 0);
-          setStudents(data || []);
+          setHistory(historyRes.data || []);
         }
       } catch (err) {
         console.error('Unexpected fetch error:', err);
@@ -277,8 +306,8 @@ export default function App() {
     fetchStudents();
 
     // Subscribe to real-time changes
-    const channel = supabase
-      .channel(`room-${roomId}`)
+    const studentsChannel = supabase
+      .channel(`room-${roomId}-students`)
       .on(
         'postgres_changes',
         {
@@ -288,7 +317,6 @@ export default function App() {
           filter: `room_id=eq.${roomId}`
         },
         (payload) => {
-          console.log('Realtime event received:', payload.eventType, payload.new);
           if (payload.eventType === 'INSERT') {
             setStudents(prev => {
               const exists = prev.find(s => s.student_id === payload.new.student_id);
@@ -304,8 +332,37 @@ export default function App() {
       )
       .subscribe();
 
+    const historyChannel = supabase
+      .channel(`room-${roomId}-history`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'history',
+          filter: `room_id=eq.${roomId}`
+        },
+        (payload) => {
+          setHistory(prev => [payload.new as HistoryEntry, ...prev].slice(0, 50));
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'history',
+          filter: `room_id=eq.${roomId}`
+        },
+        (payload) => {
+          setHistory(prev => prev.filter(h => h.id !== payload.old.id));
+        }
+      )
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(studentsChannel);
+      supabase.removeChannel(historyChannel);
     };
   }, [roomId]);
 
@@ -326,24 +383,34 @@ export default function App() {
     if (error) {
       console.error('Error upserting student:', error);
       alert('操作失败: ' + error.message);
-    } else if (!skipHistory && studentData.id) {
-      // Find original student for history
-      const original = students.find(s => s.id === studentData.id);
-      if (original) {
-        const newEntry: HistoryEntry = {
-          id: Math.random().toString(36).substr(2, 9),
-          student_id: studentData.student_id || original.student_id,
-          student_name: studentData.name || original.name,
-          action: 'score_change',
-          details: JSON.stringify({
-            prevScore: original.score,
-            newScore: studentData.score,
-            prevPresent: original.is_present,
-            newPresent: studentData.is_present
-          }),
-          timestamp: new Date().toISOString()
-        };
-        setHistory(prev => [newEntry, ...prev].slice(0, 50));
+    } else if (!skipHistory) {
+      // Record history
+      const original = studentData.id ? students.find(s => s.id === studentData.id) : null;
+      
+      const newEntry: Partial<HistoryEntry> = {
+        room_id: roomId,
+        student_id: studentData.student_id || (original?.student_id),
+        student_name: studentData.name || (original?.name),
+        action: studentData.id ? 'score_change' : 'add',
+        details: JSON.stringify({
+          prevScore: original?.score || 0,
+          newScore: studentData.score,
+          prevPresent: original?.is_present ?? true,
+          newPresent: studentData.is_present ?? true,
+          isNew: !studentData.id
+        }),
+        timestamp: new Date().toISOString(),
+        operator: operatorName
+      };
+      
+      const { data, error: histError } = await supabase
+        .from('history')
+        .insert(newEntry)
+        .select()
+        .single();
+        
+      if (!histError && data) {
+        setHistory(prev => [data as HistoryEntry, ...prev].slice(0, 50));
       }
     }
   };
@@ -361,15 +428,25 @@ export default function App() {
       alert('删除失败: ' + error.message);
     } else {
       // Record in history
-      const newEntry: HistoryEntry = {
-        id: Math.random().toString(36).substr(2, 9),
+      const newEntry: Partial<HistoryEntry> = {
+        room_id: roomId,
         student_id: student.student_id,
         student_name: student.name,
         action: 'delete',
         details: JSON.stringify(student),
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        operator: operatorName
       };
-      setHistory(prev => [newEntry, ...prev].slice(0, 50));
+      
+      const { data, error: histError } = await supabase
+        .from('history')
+        .insert(newEntry)
+        .select()
+        .single();
+        
+      if (!histError && data) {
+        setHistory(prev => [data as HistoryEntry, ...prev].slice(0, 50));
+      }
     }
   };
 
@@ -380,6 +457,9 @@ export default function App() {
       // Re-insert the student
       const { id, ...studentWithoutId } = details;
       await upsertStudent(studentWithoutId, true);
+      
+      // Delete from DB
+      await supabase.from('history').delete().eq('id', entry.id);
       setHistory(prev => prev.filter(h => h.id !== entry.id));
       return;
     }
@@ -391,6 +471,9 @@ export default function App() {
         score: details.prevScore,
         is_present: details.prevPresent
       }, true);
+      
+      // Delete from DB
+      await supabase.from('history').delete().eq('id', entry.id);
       setHistory(prev => prev.filter(h => h.id !== entry.id));
     }
   };
@@ -399,6 +482,18 @@ export default function App() {
     const updated = {
       ...student,
       score: Math.max(0, student.score + delta)
+    };
+    // Optimistic
+    setStudents(prev => prev.map(s => s.id === student.id ? updated : s));
+    // Update draw results if present
+    setDrawResults(prev => prev.map(s => s.id === student.id ? updated : s));
+    await upsertStudent(updated);
+  };
+
+  const setStudentScore = async (student: Student, newScore: number) => {
+    const updated = {
+      ...student,
+      score: Math.max(0, newScore)
     };
     // Optimistic
     setStudents(prev => prev.map(s => s.id === student.id ? updated : s));
@@ -437,22 +532,76 @@ export default function App() {
       return;
     }
 
+    const count = Math.max(1, Math.min(10, drawFilters.count || 1));
     setIsDrawing(true);
+    setHasDrawn(true);
     setDrawResults([]);
 
-    // Animation effect
+    // Animation effect - Shuffle names rapidly
     let counter = 0;
     const interval = setInterval(() => {
       const shuffled = [...pool].sort(() => 0.5 - Math.random());
-      setDrawResults(shuffled.slice(0, drawFilters.count));
+      setDrawResults(shuffled.slice(0, count));
       counter++;
-      if (counter > 15) {
+      if (counter > 12) { // Slightly fewer iterations for snappier feel
         clearInterval(interval);
         const finalShuffled = [...pool].sort(() => 0.5 - Math.random());
-        setDrawResults(finalShuffled.slice(0, drawFilters.count));
+        setDrawResults(finalShuffled.slice(0, count));
         setIsDrawing(false);
       }
-    }, 100);
+    }, 80); // Faster interval
+  };
+
+  const applyBatchScore = async () => {
+    if (selectedBatchStudents.length === 0 || !supabase || !roomId) return;
+    
+    setLoading(true);
+    try {
+      const updates = selectedBatchStudents.map(student => ({
+        ...student,
+        score: Math.max(0, student.score + batchScoreDelta),
+        updated_at: new Date().toISOString()
+      }));
+
+      const { error } = await supabase
+        .from('students')
+        .upsert(updates, { onConflict: 'student_id,room_id' });
+
+      if (error) throw error;
+
+      // Record in history for each
+      for (const student of selectedBatchStudents) {
+        const newEntry: Partial<HistoryEntry> = {
+          room_id: roomId,
+          student_id: student.student_id,
+          student_name: student.name,
+          action: 'score_change',
+          details: JSON.stringify({
+            prevScore: student.score,
+            newScore: student.score + batchScoreDelta,
+            isBatch: true
+          }),
+          timestamp: new Date().toISOString(),
+          operator: operatorName
+        };
+        await supabase.from('history').insert(newEntry);
+      }
+
+      alert(`✅ 成功为 ${selectedBatchStudents.length} 名学生更新分数！`);
+      setIsBatchModalOpen(false);
+      setSelectedBatchStudents([]);
+      setBatchSearchQuery('');
+    } catch (err: any) {
+      console.error('Batch update error:', err);
+      alert('❌ 批量更新失败: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getShortId = (id: string) => {
+    if (id.length >= 3) return id.slice(-3);
+    return id;
   };
 
   // --- Derived State ---
@@ -462,13 +611,68 @@ export default function App() {
   }, [students]);
 
   const filteredStudents = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     return students.filter(s => {
-      const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                           s.student_id.includes(searchQuery);
       const matchesClass = selectedClass === 'All' || s.class_name === selectedClass;
-      return matchesSearch && matchesClass;
+      if (!q) return matchesClass;
+
+      const matchesName = s.name.toLowerCase().includes(q);
+      const matchesClassExact = s.class_name.toLowerCase() === q;
+      
+      // Smart Numeric ID match: handles 1, 01, 001 etc.
+      const sId = s.student_id.trim();
+      const sShortId = getShortId(sId);
+      const sIdIsNumeric = /^\d+$/.test(sId);
+      const sShortIdIsNumeric = /^\d+$/.test(sShortId);
+      const qIsNumeric = /^\d+$/.test(q);
+      
+      let matchesId = false;
+      if (qIsNumeric) {
+        const qNum = parseInt(q, 10);
+        const fullIdMatch = sIdIsNumeric && parseInt(sId, 10) === qNum;
+        const shortIdMatch = sShortIdIsNumeric && parseInt(sShortId, 10) === qNum;
+        matchesId = fullIdMatch || shortIdMatch;
+      } else {
+        matchesId = sId.toLowerCase() === q || sShortId.toLowerCase() === q;
+      }
+
+      // If it matches by ID or exact class name, show it globally
+      if (matchesId || matchesClassExact) return true;
+      
+      // If it matches by name, respect class filter
+      return matchesName && matchesClass;
     });
   }, [students, searchQuery, selectedClass]);
+
+  const batchSearchResults = useMemo(() => {
+    const q = batchSearchQuery.trim().toLowerCase();
+    if (!q) return [];
+    
+    return students.filter(s => {
+      const matchesName = s.name.toLowerCase().includes(q);
+      const matchesClassExact = s.class_name.toLowerCase() === q;
+      
+      // Smart Numeric ID match
+      const sId = s.student_id.trim();
+      const sShortId = getShortId(sId);
+      const sIdIsNumeric = /^\d+$/.test(sId);
+      const sShortIdIsNumeric = /^\d+$/.test(sShortId);
+      const qIsNumeric = /^\d+$/.test(q);
+      
+      let matchesId = false;
+      if (qIsNumeric) {
+        const qNum = parseInt(q, 10);
+        const fullIdMatch = sIdIsNumeric && parseInt(sId, 10) === qNum;
+        const shortIdMatch = sShortIdIsNumeric && parseInt(sShortId, 10) === qNum;
+        matchesId = fullIdMatch || shortIdMatch;
+      } else {
+        matchesId = sId.toLowerCase() === q || sShortId.toLowerCase() === q;
+      }
+
+      const isAlreadySelected = selectedBatchStudents.some(selected => selected.id === s.id);
+      return (matchesName || matchesId || matchesClassExact) && !isAlreadySelected;
+    }).slice(0, 10); // Increased slice to 10 for better visibility
+  }, [students, batchSearchQuery, selectedBatchStudents]);
 
   // --- Excel Import/Export ---
   const exportToExcel = () => {
@@ -574,6 +778,18 @@ export default function App() {
           console.error('Supabase Upsert Error:', error);
           throw new Error(`数据库保存失败: ${error.message}`);
         }
+
+        // Record batch import in history
+        const importEntry: Partial<HistoryEntry> = {
+          room_id: roomId,
+          student_id: 'BATCH_IMPORT',
+          student_name: '批量导入',
+          action: 'add',
+          details: JSON.stringify({ count: studentsToUpsert.length }),
+          timestamp: new Date().toISOString(),
+          operator: operatorName
+        };
+        await supabase.from('history').insert(importEntry);
         
         console.log('Upsert successful, manually refreshing...');
         
@@ -602,11 +818,6 @@ export default function App() {
 
     reader.readAsArrayBuffer(file);
     e.target.value = ''; 
-  };
-
-  const getShortId = (id: string) => {
-    if (id.length >= 3) return id.slice(-3);
-    return id;
   };
 
   // --- UI Views ---
@@ -801,25 +1012,81 @@ export default function App() {
               {history.length === 0 ? (
                 <p className="text-[10px] text-slate-400 text-center py-4 italic">暂无操作记录</p>
               ) : (
-                history.map(entry => (
-                  <div key={entry.id} className="p-2 bg-slate-50 rounded-lg border border-slate-100 group relative">
-                    <div className="flex justify-between items-start mb-1">
-                      <span className="text-[10px] font-bold text-slate-700 truncate max-w-[100px]">{entry.student_name}</span>
-                      <span className="text-[8px] text-slate-400">{new Date(entry.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[9px] text-indigo-600 font-medium">
-                        {entry.action === 'delete' ? '删除学生' : '分数变动'}
-                      </span>
-                      <button 
-                        onClick={() => undoHistory(entry)}
-                        className="text-[9px] text-red-500 hover:text-red-700 font-bold opacity-0 group-hover:opacity-100 transition-opacity"
+                <AnimatePresence initial={false}>
+                  {history.map(entry => {
+                    const isMe = entry.operator === operatorName;
+                    const displayName = isMe ? '你' : (entry.operator || '未知');
+                    
+                    let actionText = '';
+                    let scoreBadge = null;
+                    
+                    try {
+                      const details = JSON.parse(entry.details);
+                      if (entry.action === 'score_change') {
+                        const delta = (details.newScore ?? 0) - (details.prevScore ?? 0);
+                        const deltaText = delta > 0 ? `+${delta}` : `${delta}`;
+                        actionText = `刚刚给 ${entry.student_name} ${delta >= 0 ? '加' : '减'}了 ${Math.abs(delta)} 分`;
+                        scoreBadge = (
+                          <span className={cn(
+                            "text-[8px] font-bold px-1 rounded",
+                            delta >= 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                          )}>
+                            {deltaText}
+                          </span>
+                        );
+                      } else if (entry.action === 'add') {
+                        if (entry.student_id === 'BATCH_IMPORT') {
+                          actionText = `批量导入了 ${details.count} 名学生`;
+                        } else {
+                          actionText = `添加了新学生 ${entry.student_name}`;
+                        }
+                      } else if (entry.action === 'delete') {
+                        actionText = `删除了学生 ${entry.student_name}`;
+                      } else if (entry.action === 'attendance_change') {
+                        actionText = `修改了 ${entry.student_name} 的出勤状态`;
+                      }
+                    } catch (e) {
+                      actionText = entry.action === 'delete' ? '删除学生' : '分数变动';
+                    }
+
+                    return (
+                      <motion.div 
+                        key={entry.id}
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="p-2 bg-white rounded-lg border border-slate-100 group relative shadow-sm hover:shadow-md transition-all"
                       >
-                        撤销
-                      </button>
-                    </div>
-                  </div>
-                ))
+                        <div className="flex justify-between items-start mb-0.5">
+                          <div className="flex items-center gap-1 flex-1 min-w-0">
+                            <span className={cn(
+                              "text-[10px] font-bold truncate",
+                              isMe ? "text-indigo-600" : "text-slate-700"
+                            )}>
+                              {displayName}
+                            </span>
+                            <span className="text-[9px] text-slate-500 flex-1 truncate">
+                              {actionText}
+                            </span>
+                          </div>
+                          <span className="text-[8px] text-slate-400 whitespace-nowrap ml-1">
+                            {new Date(entry.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between mt-1">
+                          <div className="flex items-center gap-2">
+                            {scoreBadge}
+                          </div>
+                          <button 
+                            onClick={() => undoHistory(entry)}
+                            className="text-[9px] text-red-500 hover:text-red-700 font-bold opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            撤销
+                          </button>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
               )}
             </div>
           </div>
@@ -877,10 +1144,24 @@ export default function App() {
               variant="primary" 
               size="sm" 
               className="gap-2 shrink-0 bg-purple-600 hover:bg-purple-700 border-none shadow-md shadow-purple-100 whitespace-nowrap" 
-              onClick={() => setIsDrawModalOpen(true)}
+              onClick={() => {
+                setHasDrawn(false);
+                setDrawResults([]);
+                setIsDrawModalOpen(true);
+              }}
             >
               <Dices className="w-4 h-4" />
               随机抽人
+            </Button>
+
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="gap-2 shrink-0 bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-sm whitespace-nowrap" 
+              onClick={() => setIsBatchModalOpen(true)}
+            >
+              <Users className="w-4 h-4 text-indigo-500" />
+              批量加分
             </Button>
 
             <Button 
@@ -1156,7 +1437,7 @@ export default function App() {
         </div>
       </Modal>
 
-      <Modal isOpen={isDrawModalOpen} onClose={() => setIsDrawModalOpen(false)} title="随机抽人回答问题" maxWidth="max-w-2xl">
+      <Modal isOpen={isDrawModalOpen} onClose={() => setIsDrawModalOpen(false)} title="随机抽人" maxWidth="max-w-2xl">
         <div className="space-y-4 sm:space-y-6">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
             <div>
@@ -1175,8 +1456,11 @@ export default function App() {
                 type="number"
                 min="1"
                 max="10"
-                value={drawFilters.count}
-                onChange={(e) => setDrawFilters({ ...drawFilters, count: parseInt(e.target.value) || 1 })}
+                value={drawFilters.count || ''}
+                onChange={(e) => {
+                  const val = e.target.value === '' ? 0 : parseInt(e.target.value);
+                  setDrawFilters({ ...drawFilters, count: val });
+                }}
                 className="w-full px-2 sm:px-3 py-1.5 sm:py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none"
               />
             </div>
@@ -1193,97 +1477,186 @@ export default function App() {
             </div>
           </div>
 
-          <div className="relative min-h-[180px] sm:min-h-[200px] max-h-[300px] sm:max-h-[400px] overflow-y-auto p-3 sm:p-4 bg-slate-900 rounded-2xl sm:rounded-3xl border-4 border-slate-800 shadow-inner custom-scrollbar">
-            <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-purple-500 via-transparent to-transparent pointer-events-none" />
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative z-10">
-              <AnimatePresence mode="popLayout">
-                {drawResults.length > 0 ? (
-                  drawResults.map(student => (
+          {(drawResults.length > 0 || isDrawing) && (
+            <div className="relative min-h-[180px] sm:min-h-[200px] max-h-[300px] sm:max-h-[400px] overflow-y-auto p-3 sm:p-4 bg-slate-900 rounded-2xl sm:rounded-3xl border-4 border-slate-800 shadow-inner custom-scrollbar">
+              <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-purple-500 via-transparent to-transparent pointer-events-none" />
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative z-10">
+                <AnimatePresence mode="popLayout">
+                  {drawResults.map(student => (
                     <motion.div 
                       key={student.id}
-                      initial={{ scale: 0.8, opacity: 0 }}
+                      initial={isDrawing ? { opacity: 0.8, scale: 0.95 } : { scale: 0.8, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
+                      transition={isDrawing ? { duration: 0.05 } : { type: "spring", damping: 12, stiffness: 200 }}
                       className="bg-purple-600/20 border border-purple-500/30 rounded-2xl p-3 sm:p-4 text-center backdrop-blur-sm"
                     >
                       <div className="text-purple-400 text-[10px] font-mono mb-1">{student.class_name} · {getShortId(student.student_id)}</div>
                       <div className="text-lg sm:text-xl font-black text-white tracking-wider mb-2 sm:mb-3">{student.name}</div>
                       
-                      <div className="flex items-center justify-between bg-black/20 rounded-xl p-2">
-                        <div className="flex items-center gap-1.5">
-                          <Award className="w-3 h-3 text-amber-400" />
-                          <span className="text-sm font-black text-white">{student.score}</span>
-                        </div>
-                        <div className="flex gap-1">
-                          <button 
-                            onClick={() => updateScore(student, -customScore)}
-                            className="w-7 h-7 flex items-center justify-center bg-white/10 rounded-lg text-white hover:bg-red-500/40 transition-all active:scale-90"
-                          >
-                            -{customScore}
-                          </button>
-                          <button 
-                            onClick={() => updateScore(student, customScore)}
-                            className="w-7 h-7 flex items-center justify-center bg-purple-500 rounded-lg text-white hover:bg-purple-400 shadow-lg shadow-purple-500/20 transition-all active:scale-90"
-                          >
-                            +{customScore}
-                          </button>
+                      <div className="flex items-center justify-center bg-black/20 rounded-xl p-2 mt-2">
+                        <div className="relative">
+                          <input 
+                            type="number"
+                            value={student.score}
+                            onChange={(e) => setStudentScore(student, parseInt(e.target.value) || 0)}
+                            className="w-20 pl-3 pr-8 py-1.5 bg-white/10 border border-white/20 rounded-lg text-white text-sm font-black text-center focus:ring-2 focus:ring-purple-500/50 outline-none"
+                          />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-white/40 font-bold pointer-events-none">分</span>
                         </div>
                       </div>
                     </motion.div>
-                  ))
-                ) : (
-                  !isDrawing && <div className="col-span-full text-center py-8 sm:py-12 text-slate-500 font-medium italic">准备就绪...</div>
-                )}
-              </AnimatePresence>
+                  ))}
+                </AnimatePresence>
+              </div>
             </div>
+          )}
 
-            {isDrawing && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="absolute inset-0 bg-purple-900/40 backdrop-blur-[2px] flex items-center justify-center z-20"
-              >
-                <div className="w-10 h-10 sm:w-12 sm:h-12 border-4 border-white/30 border-t-white rounded-full animate-spin" />
-              </motion.div>
+          <div className={cn("flex gap-3", !hasDrawn && "flex-row-reverse")}>
+            <Button 
+              className="flex-1 bg-purple-600 hover:bg-purple-700 border-none text-base sm:text-lg font-bold shadow-xl shadow-purple-200" 
+              onClick={pickRandomStudent}
+              disabled={isDrawing}
+            >
+              {isDrawing ? '抽取中...' : (hasDrawn ? '再次抽取' : '开始抽取')}
+            </Button>
+            <Button 
+              variant={hasDrawn ? "primary" : "secondary"}
+              className={cn(
+                "flex-1 text-base sm:text-lg font-bold",
+                hasDrawn ? "bg-emerald-600 hover:bg-emerald-700 border-none shadow-xl shadow-emerald-200" : ""
+              )} 
+              onClick={() => setIsDrawModalOpen(false)}
+            >
+              {hasDrawn ? '太棒了！' : '关闭'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={isBatchModalOpen} onClose={() => setIsBatchModalOpen(false)} title="批量加分" maxWidth="max-w-xl">
+        <div className="space-y-6">
+          <div className="relative">
+            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">搜索学生 (姓名或学号末尾)</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Input 
+                placeholder="输入姓名或学号..." 
+                className="pl-10"
+                value={batchSearchQuery}
+                onChange={(e) => setBatchSearchQuery(e.target.value)}
+              />
+            </div>
+            
+            {batchSearchResults.length > 0 && (
+              <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden">
+                {batchSearchResults.map(student => (
+                  <button
+                    key={student.id}
+                    onClick={() => {
+                      setSelectedBatchStudents([...selectedBatchStudents, student]);
+                      setBatchSearchQuery('');
+                    }}
+                    className="w-full px-4 py-3 text-left hover:bg-slate-50 flex items-center justify-between group transition-colors"
+                  >
+                    <div>
+                      <div className="text-sm font-bold text-slate-700 group-hover:text-indigo-600">{student.name}</div>
+                      <div className="text-[10px] text-slate-400">{student.class_name} · {student.student_id}</div>
+                    </div>
+                    <Plus className="w-4 h-4 text-slate-300 group-hover:text-indigo-500" />
+                  </button>
+                ))}
+              </div>
             )}
           </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-100">
-            <div className="w-full sm:flex-1">
-              <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">自定义加减分值</label>
-              <div className="flex flex-wrap items-center gap-2">
-                {[1, 2, 5, 10].map(val => (
-                  <button
-                    key={val}
-                    onClick={() => setCustomScore(val)}
-                    className={cn(
-                      "px-2.5 py-1 rounded-lg text-[10px] sm:text-xs font-bold transition-all",
-                      customScore === val ? "bg-indigo-600 text-white shadow-md shadow-indigo-100" : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
-                    )}
-                  >
-                    {val}
-                  </button>
-                ))}
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">已选择 ({selectedBatchStudents.length})</label>
+            <div className="flex flex-wrap gap-2 min-h-[40px] p-3 bg-slate-50 rounded-xl border border-slate-100">
+              {selectedBatchStudents.length === 0 ? (
+                <span className="text-xs text-slate-400 italic">尚未选择学生</span>
+              ) : (
+                selectedBatchStudents.map(student => (
+                  <div key={student.id} className="flex items-center gap-1.5 bg-white border border-slate-200 pl-2 pr-1 py-1 rounded-lg shadow-sm animate-in fade-in zoom-in duration-200">
+                    <span className="text-xs font-bold text-slate-700">{student.name}</span>
+                    <button 
+                      onClick={() => setSelectedBatchStudents(selectedBatchStudents.filter(s => s.id !== student.id))}
+                      className="p-0.5 hover:bg-red-50 rounded text-slate-400 hover:text-red-500 transition-colors"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-indigo-400 uppercase mb-2">统一加分值</label>
+              <div className="flex items-center gap-3">
                 <input 
                   type="number"
-                  value={customScore}
-                  onChange={(e) => setCustomScore(parseInt(e.target.value) || 1)}
-                  className="w-14 sm:w-16 px-2 py-1 bg-white border border-slate-200 rounded-lg text-[10px] sm:text-xs font-bold focus:ring-2 focus:ring-indigo-500/20 outline-none"
+                  value={batchScoreDelta}
+                  onChange={(e) => setBatchScoreDelta(parseInt(e.target.value) || 0)}
+                  className="w-20 px-3 py-2 bg-white border border-indigo-200 rounded-xl text-sm font-black text-indigo-600 focus:ring-2 focus:ring-indigo-500/20 outline-none"
                 />
+                <div className="flex gap-1">
+                  {[1, 2, 5, 10].map(val => (
+                    <button
+                      key={val}
+                      onClick={() => setBatchScoreDelta(val)}
+                      className={cn(
+                        "px-2 py-1 rounded-lg text-[10px] font-bold transition-all",
+                        batchScoreDelta === val ? "bg-indigo-600 text-white" : "bg-white text-indigo-600 border border-indigo-100 hover:bg-indigo-50"
+                      )}
+                    >
+                      +{val}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="flex gap-3">
-            <Button variant="secondary" className="flex-1 text-sm sm:text-base" onClick={() => setIsDrawModalOpen(false)}>关闭</Button>
+          <div className="flex gap-3 pt-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setIsBatchModalOpen(false)}>取消</Button>
             <Button 
-              className="flex-[2] bg-purple-600 hover:bg-purple-700 border-none text-base sm:text-lg font-bold shadow-xl shadow-purple-200" 
-              onClick={pickRandomStudent}
-              disabled={isDrawing}
+              className="flex-[2] bg-indigo-600 hover:bg-indigo-700 border-none shadow-lg shadow-indigo-200"
+              disabled={selectedBatchStudents.length === 0 || loading}
+              onClick={applyBatchScore}
             >
-              {isDrawing ? '抽取中...' : '开始抽取'}
+              {loading ? '处理中...' : `确认加分 (${selectedBatchStudents.length}人)`}
             </Button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal 
+        isOpen={isOperatorModalOpen} 
+        onClose={() => {}} // Prevent closing without input
+        title="身份确认"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">请输入您的身份（如：语文课代表-小明）</p>
+          <Input 
+            placeholder="身份名称..." 
+            value={tempOperatorName}
+            onChange={(e) => setTempOperatorName(e.target.value)}
+            autoFocus
+          />
+          <Button 
+            className="w-full" 
+            disabled={!tempOperatorName.trim()}
+            onClick={() => {
+              const name = tempOperatorName.trim();
+              setOperatorName(name);
+              localStorage.setItem('operator_name', name);
+              setIsOperatorModalOpen(false);
+            }}
+          >
+            确认进入
+          </Button>
         </div>
       </Modal>
 
