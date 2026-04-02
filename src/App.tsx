@@ -343,7 +343,11 @@ export default function App() {
           filter: `room_id=eq.${roomId}`
         },
         (payload) => {
-          setHistory(prev => [payload.new as HistoryEntry, ...prev].slice(0, 50));
+          setHistory(prev => {
+            // Avoid duplicates from manual optimistic updates
+            if (prev.find(h => h.id === payload.new.id)) return prev;
+            return [payload.new as HistoryEntry, ...prev].slice(0, 50);
+          });
         }
       )
       .on(
@@ -358,7 +362,11 @@ export default function App() {
           setHistory(prev => prev.filter(h => h.id !== payload.old.id));
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status !== 'SUBSCRIBED') {
+          console.warn('History Realtime subscription status:', status);
+        }
+      });
 
     return () => {
       supabase.removeChannel(studentsChannel);
@@ -1025,7 +1033,7 @@ export default function App() {
                       if (entry.action === 'score_change') {
                         const delta = (details.newScore ?? 0) - (details.prevScore ?? 0);
                         const deltaText = delta > 0 ? `+${delta}` : `${delta}`;
-                        actionText = `刚刚给 ${entry.student_name} ${delta >= 0 ? '加' : '减'}了 ${Math.abs(delta)} 分`;
+                        actionText = `${entry.student_name} ${delta >= 0 ? '加' : '减'}${Math.abs(delta)}分`;
                         scoreBadge = (
                           <span className={cn(
                             "text-[8px] font-bold px-1 rounded",
@@ -1038,12 +1046,12 @@ export default function App() {
                         if (entry.student_id === 'BATCH_IMPORT') {
                           actionText = `批量导入了 ${details.count} 名学生`;
                         } else {
-                          actionText = `添加了新学生 ${entry.student_name}`;
+                          actionText = `添加了 ${entry.student_name}`;
                         }
                       } else if (entry.action === 'delete') {
-                        actionText = `删除了学生 ${entry.student_name}`;
+                        actionText = `删除了 ${entry.student_name}`;
                       } else if (entry.action === 'attendance_change') {
-                        actionText = `修改了 ${entry.student_name} 的出勤状态`;
+                        actionText = `修改了 ${entry.student_name} 出勤`;
                       }
                     } catch (e) {
                       actionText = entry.action === 'delete' ? '删除学生' : '分数变动';
@@ -1638,7 +1646,7 @@ export default function App() {
         title="身份确认"
       >
         <div className="space-y-4">
-          <p className="text-sm text-slate-600">请输入您的身份（如：语文课代表-小明）</p>
+          <p className="text-sm text-slate-600">请输入您的身份（如：课代表-小明）</p>
           <Input 
             placeholder="身份名称..." 
             value={tempOperatorName}
